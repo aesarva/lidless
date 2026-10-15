@@ -5,11 +5,10 @@ import Testing
 private func makeBackend(
     runner: FakeCommandRunner,
     helperDirectory: URL = URL(fileURLWithPath: "/tmp/helper"),
-    temporaryDirectory: URL = FileManager.default.temporaryDirectory,
     fileExists: @escaping @Sendable (String) -> Bool = { _ in true }
 ) -> SudoersBackend {
     SudoersBackend(runner: runner, helperDirectory: helperDirectory, userName: "alex",
-                   temporaryDirectory: temporaryDirectory, fileExists: fileExists)
+                   fileExists: fileExists)
 }
 
 @Suite struct HelperTests {
@@ -86,10 +85,10 @@ private func makeBackend(
     @Test func installCommandEscapesPaths() throws {
         let dir = "/Users/o'brien/Down loads/WakeUp \"2\".app/Contents/Resources/Helper"
         let backend = makeBackend(runner: FakeCommandRunner(), helperDirectory: URL(fileURLWithPath: dir))
-        let sudoers = URL(fileURLWithPath: "/tmp/wakeup-sudoers-X")
-        let cmd = backend.installCommand(sudoersFile: sudoers)
+        let rule = try SudoersRule.render(userName: "alex")
+        let cmd = backend.installCommand(ruleText: rule)
         let q = "'/Users/o'\\''brien/Down loads/WakeUp \"2\".app/Contents/Resources/Helper'"
-        #expect(cmd == "/bin/bash '/Users/o'\\''brien/Down loads/WakeUp \"2\".app/Contents/Resources/Helper/install.sh' '/tmp/wakeup-sudoers-X' 'alex' \(q)")
+        #expect(cmd == "/bin/bash '/Users/o'\\''brien/Down loads/WakeUp \"2\".app/Contents/Resources/Helper/install.sh' '\(rule)' 'alex' \(q)")
 
         #expect(SudoersBackend.appleScriptString(#"a"b\c"#) == #""a\"b\\c""#)
 
@@ -103,21 +102,28 @@ private func makeBackend(
         try p.run()
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        let lines = String(decoding: data, as: UTF8.self)
-            .split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
-        #expect(lines == [dir + "/install.sh", sudoers.path, "alex", dir])
+        #expect(p.terminationStatus == 0)
+        // printf '%s\n' emits each argument followed by a newline.
+        let expected = [dir + "/install.sh", rule, "alex", dir].map { $0 + "\n" }.joined()
+        #expect(String(decoding: data, as: UTF8.self) == expected)
     }
 
     @Test func installCancelled() throws {
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("wakeup-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmp) }
+        let tmpDir = FileManager.default.temporaryDirectory.path
+        let before = Set((try? FileManager.default.contentsOfDirectory(atPath: tmpDir)) ?? [])
         let runner = FakeCommandRunner()
         runner.fallback = CommandResult(exitCode: 1, stdout: "", stderr: "execution error: User canceled. (-128)")
-        let backend = makeBackend(runner: runner, temporaryDirectory: tmp)
+        let helperDir = URL(fileURLWithPath: "/tmp/helper")
+        let backend = makeBackend(runner: runner, helperDirectory: helperDir)
         #expect(throws: HelperError.cancelled) { try backend.install() }
-        #expect(runner.calls.first?.first == "/usr/bin/osascript")
-        #expect(try FileManager.default.contentsOfDirectory(atPath: tmp.path).isEmpty)
+        #expect(runner.calls.count == 1)
+        #expect(runner.calls[0][0] == "/usr/bin/osascript")
+        #expect(runner.calls[0][1] == "-e")
+        let cmd = backend.installCommand(ruleText: try SudoersRule.render(userName: "alex"))
+        #expect(runner.calls[0][2] == "do shell script " + SudoersBackend.appleScriptString(cmd) + " with administrator privileges")
+        // The app must not write the rule anywhere.
+        let after = Set((try? FileManager.default.contentsOfDirectory(atPath: tmpDir)) ?? [])
+        #expect(after.filter { $0.hasPrefix("wakeup-sudoers") && !before.contains($0) }.isEmpty)
     }
 
     @Test func installFailureAndUninstall() throws {

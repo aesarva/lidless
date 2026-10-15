@@ -9,16 +9,13 @@ public final class SudoersBackend: PrivilegedBackend {
     private let runner: CommandRunner
     private let helperDirectory: URL
     private let userName: String
-    private let temporaryDirectory: URL
     private let fileExists: @Sendable (String) -> Bool
 
     public init(runner: CommandRunner, helperDirectory: URL, userName: String,
-                temporaryDirectory: URL = FileManager.default.temporaryDirectory,
                 fileExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) {
         self.runner = runner
         self.helperDirectory = helperDirectory
         self.userName = userName
-        self.temporaryDirectory = temporaryDirectory
         self.fileExists = fileExists
     }
 
@@ -48,10 +45,7 @@ public final class SudoersBackend: PrivilegedBackend {
 
     public func install() throws {
         let rule = try SudoersRule.render(userName: userName)
-        let file = temporaryDirectory.appendingPathComponent("wakeup-sudoers-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: file) }
-        try rule.write(to: file, atomically: true, encoding: .utf8)
-        try runPrivileged(installCommand(sudoersFile: file))
+        try runPrivileged(installCommand(ruleText: rule))
     }
 
     public func uninstall() throws {
@@ -69,10 +63,11 @@ public final class SudoersBackend: PrivilegedBackend {
         throw HelperError.installFailed(r.stderr)
     }
 
-    /// Argument order is a contract with install.sh: `<sudoers_tmp_file> <user> <helper_dir>`.
-    func installCommand(sudoersFile: URL) -> String {
+    /// Contract with install.sh: `install.sh <sudoers_rule_text> <user> <helper_dir>`.
+    /// The rule text is passed inline so the app never writes a file that root later trusts.
+    func installCommand(ruleText: String) -> String {
         let script = helperDirectory.appendingPathComponent("install.sh").path
-        let args = [script, sudoersFile.path, userName, helperDirectory.path]
+        let args = [script, ruleText, userName, helperDirectory.path]
         return "/bin/bash " + args.map(Self.shellQuote).joined(separator: " ")
     }
 
