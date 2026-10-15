@@ -71,8 +71,8 @@ import os
     public func stop(_ reason: StopReason) {
         guard case .active(let s) = state else { return }
         assertions.release()
-        if s.lidModeActive {
-            _ = disableLidHandlingFailure()
+        if s.lidModeActive, !disableLidHandlingFailure() {
+            recoveryPending = true
         }
         notifier.cancelEndingSoon()
         switch reason {

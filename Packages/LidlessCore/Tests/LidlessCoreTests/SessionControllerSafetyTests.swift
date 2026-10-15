@@ -150,6 +150,14 @@ struct SessionControllerSafetyTests {
         #expect(helperUnavailablePosts() == 1)
     }
 
+    @Test func stopDisableFailureKeepsWarningBeforeNextPoll() {
+        startWithLid()
+        lid.failDisable = true
+        c.stop(.user)
+        c.clearAttention()
+        #expect(c.attention == .helperUnavailable)
+    }
+
     @Test func failedRecoveryWhileOffKeepsWarningUntilRecovered() {
         startWithLid()
         lid.failDisable = true
