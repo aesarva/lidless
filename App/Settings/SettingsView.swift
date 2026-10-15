@@ -22,7 +22,7 @@ struct SettingsView: View {
             SafetyTab(controller: controller)
                 .tabItem { Label("Safety", systemImage: "shield") }
                 .tag(SettingsTab.safety)
-            HelperTab(helper: helper)
+            HelperTab(controller: controller, helper: helper)
                 .tabItem { Label("Helper", systemImage: "wrench.and.screwdriver") }
                 .tag(SettingsTab.helper)
             AboutTab()

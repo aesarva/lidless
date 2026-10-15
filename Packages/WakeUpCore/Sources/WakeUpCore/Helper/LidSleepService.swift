@@ -5,7 +5,9 @@ import os
     func helperStatus() -> HelperStatus
     func enable() throws
     func disable() throws
-    func recoverIfNeeded()
+    /// Resets sleep if the lid-mode marker is present. Returns true when no marker is present
+    /// or the reset succeeded, false when the reset failed (disablesleep may still be 1).
+    @discardableResult func recoverIfNeeded() -> Bool
 }
 
 @MainActor public final class LidSleepService: LidSleepControlling {
@@ -24,12 +26,15 @@ import os
 
     public func enable() throws {
         let fm = FileManager.default
+        // A marker left by an earlier failed disable means disablesleep may still be 1:
+        // it is the only way back to 0, so a failed enable must not remove it.
+        let existed = fm.fileExists(atPath: markerURL.path)
         try fm.createDirectory(at: markerURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("1".utf8).write(to: markerURL)
         do {
             try backend.setSleepDisabled(true)
         } catch {
-            try? fm.removeItem(at: markerURL)
+            if !existed { try? fm.removeItem(at: markerURL) }
             throw error
         }
     }
@@ -41,13 +46,16 @@ import os
         try fm.removeItem(at: markerURL)
     }
 
-    public func recoverIfNeeded() {
-        guard FileManager.default.fileExists(atPath: markerURL.path) else { return }
+    @discardableResult
+    public func recoverIfNeeded() -> Bool {
+        guard FileManager.default.fileExists(atPath: markerURL.path) else { return true }
         log.notice("Stale lid-mode marker found; resetting sleep")
         do {
             try disable()
+            return true
         } catch {
             log.error("Recovery failed: \(String(describing: error), privacy: .public)")
+            return false
         }
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 import WakeUpCore
 
 struct HelperTab: View {
+    let controller: SessionController
     let helper: HelperModel
     @State private var errorText: String?
 
@@ -16,7 +17,9 @@ struct HelperTab: View {
                     }
                 }
                 HStack {
-                    Button("Install…") { run { await helper.install() } }
+                    Button("Install…") {
+                        run({ await helper.install() }, onSuccess: { controller.helperDidChange() })
+                    }
                     Button("Uninstall…") { run { await helper.uninstall() } }
                     if helper.isWorking { ProgressView().controlSize(.small) }
                 }
@@ -34,10 +37,13 @@ struct HelperTab: View {
         .formStyle(.grouped)
     }
 
-    private func run(_ work: @escaping () async -> HelperError?) {
+    private func run(_ work: @escaping () async -> HelperError?, onSuccess: @escaping () -> Void = {}) {
         errorText = nil
         Task {
-            guard let error = await work() else { return }
+            guard let error = await work() else {
+                onSuccess()
+                return
+            }
             switch error {
             case .cancelled: break
             case .invalidUserName(let m), .commandFailed(let m), .installFailed(let m): errorText = m

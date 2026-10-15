@@ -72,7 +72,7 @@ struct PopoverView: View {
     func helperStatus() -> HelperStatus { .installed }
     func enable() throws {}
     func disable() throws {}
-    func recoverIfNeeded() {}
+    func recoverIfNeeded() -> Bool { true }
 }
 
 private final class PreviewBackend: PrivilegedBackend {

@@ -144,6 +144,7 @@ struct LidTile: View {
                 if error != .cancelled { installError = error }
                 return
             }
+            controller.helperDidChange()
             controller.setLidMode(true)
         } else if suspended != nil {
             controller.setLidMode(true)

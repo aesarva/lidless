@@ -96,6 +96,7 @@ struct FakeError: Error {}
     var recoverCalls = 0
     var failEnable = false
     var failDisable = false
+    var failRecover = false
     var status: HelperStatus = .installed
     func helperStatus() -> HelperStatus { status }
     func enable() throws {
@@ -106,7 +107,10 @@ struct FakeError: Error {}
         disableCalls += 1
         if failDisable { throw FakeError() }
     }
-    func recoverIfNeeded() { recoverCalls += 1 }
+    func recoverIfNeeded() -> Bool {
+        recoverCalls += 1
+        return !failRecover
+    }
 }
 
 @MainActor final class FakePower: PowerMonitoring {

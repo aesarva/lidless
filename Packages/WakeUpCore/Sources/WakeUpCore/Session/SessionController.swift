@@ -18,6 +18,8 @@ import os
     public private(set) var attention: SafetyReason?
     public private(set) var startBlock: StartBlock?
     public private(set) var readings: SafetyReadings?
+    /// True while off and the most recent lid recovery failed (disablesleep may still be 1).
+    @ObservationIgnored private var recoveryPending = false
     public var settings: WakeUpSettings {
         didSet { settingsStore.save(settings) }
     }
@@ -50,7 +52,7 @@ import os
         do {
             try assertions.acquire(keepDisplayOn: settings.keepDisplayOn)
         } catch {
-            log.error("acquire failed: \(String(describing: error))")
+            log.error("acquire failed: \(String(describing: error), privacy: .public)")
             notifier.post(.assertionFailed(String(describing: error)))
             return false
         }
@@ -121,7 +123,7 @@ import os
             try assertions.acquire(keepDisplayOn: on)
             mutateSession { $0.keepDisplayOn = on }
         } catch {
-            log.error("re-acquire failed: \(String(describing: error))")
+            log.error("re-acquire failed: \(String(describing: error), privacy: .public)")
             notifier.post(.assertionFailed(String(describing: error)))
         }
     }
@@ -158,6 +160,7 @@ import os
         guard let s = session else {
             startBlock = SafetyPolicy.canStart(readings, settings: settings.safety)
                 ? nil : .lowBattery(threshold: settings.safety.batteryThreshold)
+            attemptRecovery()
             return
         }
         switch SafetyPolicy.evaluate(readings, session: s, settings: settings.safety) {
@@ -178,15 +181,27 @@ import os
         }
     }
 
+    /// Keeps `.helperUnavailable` while a failed lid recovery is still pending.
     public func clearAttention() {
-        attention = nil
+        attention = recoveryPending ? .helperUnavailable : nil
     }
 
+    /// Resets a stale lid-mode marker. Call before the safety engine starts.
     public func recoverAtLaunch() {
-        lid.recoverIfNeeded()
+        attemptRecovery()
+    }
+
+    /// Call after the first safety readings have arrived so the battery rule applies.
+    public func startOnLaunchIfEnabled() {
         if settings.startSessionOnLaunch {
             start(settings.defaultDuration)
         }
+    }
+
+    /// Call after the helper was installed or removed: retries a pending lid recovery.
+    public func helperDidChange() {
+        guard case .off = state else { return }
+        attemptRecovery()
     }
 
     // MARK: - Private
@@ -196,15 +211,26 @@ import os
     private func disableLidHandlingFailure() -> Bool {
         do {
             try lid.disable()
+            recoveryPending = false
             return true
         } catch {
             safetyLog.error("lid disable failed: \(String(describing: error), privacy: .public)")
-            if attention != .helperUnavailable {
-                attention = .helperUnavailable
-                notifier.post(.lidModeSuspended(.helperUnavailable))
-            }
+            raiseHelperUnavailable()
             return false
         }
+    }
+
+    /// While off: retries resetting a stale lid-mode marker. On failure raises and posts
+    /// `.helperUnavailable` once; on success leaves attention untouched.
+    private func attemptRecovery() {
+        recoveryPending = !lid.recoverIfNeeded()
+        if recoveryPending { raiseHelperUnavailable() }
+    }
+
+    private func raiseHelperUnavailable() {
+        guard attention != .helperUnavailable else { return }
+        attention = .helperUnavailable
+        notifier.post(.lidModeSuspended(.helperUnavailable))
     }
 
     private func enableLidMode() {
@@ -216,7 +242,7 @@ import os
                 $0.lidModeSuspendedReason = nil
             }
         } catch {
-            log.error("lid enable failed: \(String(describing: error))")
+            log.error("lid enable failed: \(String(describing: error), privacy: .public)")
             mutateSession {
                 if !$0.lidModeActive { $0.lidModeSuspendedReason = .helperUnavailable }
             }

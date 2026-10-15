@@ -12,3 +12,16 @@ import Foundation
     #expect(s.safety == SafetySettings(batteryRuleEnabled: true, batteryThreshold: 20, thermalRuleEnabled: true, lidLimitRuleEnabled: true, lidLimitMinutes: 240)) }
 @Test func settingsCodableRoundTrip() throws { var s = WakeUpSettings(); s.defaultDuration = .minutes(60); s.safety.batteryThreshold = 35
     #expect(try JSONDecoder().decode(WakeUpSettings.self, from: JSONEncoder().encode(s)) == s) }
+@Test func settingsDecodeMissingFieldsUsesDefaults() throws {
+    var s = WakeUpSettings(); s.defaultDuration = .minutes(60); s.presetMinutes = [5, 10]; s.keepDisplayOn = true
+    s.lidModeEnabled = true; s.showTimerInMenuBar = true; s.startSessionOnLaunch = true
+    s.safety = SafetySettings(batteryRuleEnabled: false, batteryThreshold: 35, thermalRuleEnabled: false,
+                              lidLimitRuleEnabled: false, lidLimitMinutes: 99)
+    var json = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(s)) as? [String: Any])
+    json["showTimerInMenuBar"] = nil
+    var safety = try #require(json["safety"] as? [String: Any])
+    safety["lidLimitMinutes"] = nil
+    json["safety"] = safety
+    let decoded = try JSONDecoder().decode(WakeUpSettings.self, from: JSONSerialization.data(withJSONObject: json))
+    var expected = s; expected.showTimerInMenuBar = false; expected.safety.lidLimitMinutes = 240
+    #expect(decoded == expected) }

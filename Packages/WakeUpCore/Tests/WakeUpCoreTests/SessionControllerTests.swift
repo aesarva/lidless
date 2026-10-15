@@ -142,10 +142,24 @@ struct SessionControllerTests {
         c.recoverAtLaunch()
         #expect(lid.recoverCalls == 1)
         #expect(c.state == .off)
+        c.startOnLaunchIfEnabled()
+        #expect(c.state == .off)
         c.settings.startSessionOnLaunch = true
         c.recoverAtLaunch()
         #expect(lid.recoverCalls == 2)
+        #expect(c.state == .off)
+        c.startOnLaunchIfEnabled()
         #expect(c.session != nil)
+    }
+
+    @Test func startOnLaunchSeesFirstReadings() {
+        c.settings.startSessionOnLaunch = true
+        c.recoverAtLaunch()
+        c.update(readings: SafetyReadings(batteryLevel: 5, onBattery: true, thermal: .nominal,
+                                          lidClosed: false, lidClosedOnBatterySince: nil, now: t0))
+        c.startOnLaunchIfEnabled()
+        #expect(c.state == .off)
+        #expect(c.startBlock == .lowBattery(threshold: 20))
     }
 
     @Test func lidModeEnabledOnStartAndDisabledOnStop() {

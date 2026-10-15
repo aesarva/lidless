@@ -44,8 +44,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             helper: helper,
             openSettings: { [weak self] tab in self?.settingsWindow.show(tab: tab) }
         )
+        // Order matters: reset a stale lid marker, then take the first readings
+        // (engine.start() refreshes immediately), then start-on-launch sees them.
         controller.recoverAtLaunch()
         engine.start()
+        controller.startOnLaunchIfEnabled()
         statusItem.refresh()
 
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in

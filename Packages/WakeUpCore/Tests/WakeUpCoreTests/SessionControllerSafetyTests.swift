@@ -137,6 +137,97 @@ struct SessionControllerSafetyTests {
         #expect(c.attention == .helperUnavailable)
     }
 
+    func helperUnavailablePosts() -> Int {
+        notifier.posted.filter { $0 == .lidModeSuspended(.helperUnavailable) }.count
+    }
+
+    @Test func stopDisableFailurePostsHelperUnavailable() {
+        startWithLid()
+        lid.failDisable = true
+        c.stop(.user)
+        #expect(c.state == .off)
+        #expect(c.attention == .helperUnavailable)
+        #expect(helperUnavailablePosts() == 1)
+    }
+
+    @Test func failedRecoveryWhileOffKeepsWarningUntilRecovered() {
+        startWithLid()
+        lid.failDisable = true
+        c.stop(.user)
+        #expect(c.state == .off)
+        lid.failRecover = true
+        c.update(readings: readings())
+        c.update(readings: readings())
+        #expect(lid.recoverCalls == 2)
+        #expect(c.attention == .helperUnavailable)
+        #expect(helperUnavailablePosts() == 1)
+        c.clearAttention()
+        #expect(c.attention == .helperUnavailable)
+
+        lid.failRecover = false
+        c.update(readings: readings())
+        #expect(c.attention == .helperUnavailable)
+        c.clearAttention()
+        #expect(c.attention == nil)
+    }
+
+    @Test func successfulRecoveryWhileOffKeepsUnrelatedAttention() {
+        c.start(.indefinite)
+        c.update(readings: readings(level: 10, onBattery: true))
+        #expect(c.attention == .lowBattery)
+        c.update(readings: readings(level: 10, onBattery: true))
+        #expect(c.attention == .lowBattery)
+        #expect(lid.recoverCalls == 1)
+    }
+
+    @Test func failedRecoveryAfterClearRaisesAgain() {
+        lid.failRecover = true
+        c.update(readings: readings())
+        #expect(c.attention == .helperUnavailable)
+        #expect(helperUnavailablePosts() == 1)
+        c.clearAttention()
+        c.update(readings: readings())
+        #expect(c.attention == .helperUnavailable)
+        #expect(helperUnavailablePosts() == 1)
+    }
+
+    @Test func recoverAtLaunchFailureRaisesAttention() {
+        lid.failRecover = true
+        c.recoverAtLaunch()
+        #expect(lid.recoverCalls == 1)
+        #expect(c.attention == .helperUnavailable)
+        #expect(helperUnavailablePosts() == 1)
+        c.clearAttention()
+        #expect(c.attention == .helperUnavailable)
+    }
+
+    @Test func helperDidChangeRetriesRecoveryWhileOff() {
+        lid.failRecover = true
+        c.recoverAtLaunch()
+        #expect(c.attention == .helperUnavailable)
+        lid.failRecover = false
+        c.helperDidChange()
+        #expect(lid.recoverCalls == 2)
+        c.clearAttention()
+        #expect(c.attention == nil)
+    }
+
+    @Test func helperDidChangeFailureRaisesAttention() {
+        lid.failRecover = true
+        c.helperDidChange()
+        #expect(lid.recoverCalls == 1)
+        #expect(c.attention == .helperUnavailable)
+        #expect(helperUnavailablePosts() == 1)
+    }
+
+    @Test func helperDidChangeWhileActiveDoesNotRecover() {
+        startWithLid()
+        c.helperDidChange()
+        #expect(lid.recoverCalls == 0)
+        #expect(lid.disableCalls == 0)
+        #expect(c.session?.lidModeActive == true)
+    }
+
     @Test func setLidModeOnWhileActiveIsNoop() {
         startWithLid()
         clock.advance(60)

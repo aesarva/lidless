@@ -47,8 +47,32 @@ struct LidSleepServiceTests {
         let (svc, backend, marker) = makeService()
         try FileManager.default.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("1".utf8).write(to: marker)
-        svc.recoverIfNeeded()
+        #expect(svc.recoverIfNeeded())
         #expect(backend.setCalls == [false])
         #expect(!FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    @Test func enableFailureKeepsPreexistingMarker() throws {
+        let (svc, backend, marker) = makeService()
+        try svc.enable()
+        backend.failNextSet = .commandFailed("off")
+        #expect(throws: HelperError.commandFailed("off")) { try svc.disable() }
+        backend.failNextSet = .commandFailed("on")
+        #expect(throws: HelperError.commandFailed("on")) { try svc.enable() }
+        #expect(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    @Test func recoverWithoutMarkerSucceeds() {
+        let (svc, backend, _) = makeService()
+        #expect(svc.recoverIfNeeded())
+        #expect(backend.setCalls == [])
+    }
+
+    @Test func recoverReportsFailureAndKeepsMarker() throws {
+        let (svc, backend, marker) = makeService()
+        try svc.enable()
+        backend.failNextSet = .commandFailed("z")
+        #expect(!svc.recoverIfNeeded())
+        #expect(FileManager.default.fileExists(atPath: marker.path))
     }
 }
