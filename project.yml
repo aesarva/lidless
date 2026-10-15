@@ -1,13 +1,13 @@
-name: WakeUp
+name: Lidless
 options:
   bundleIdPrefix: io.github.alexsarva
   deploymentTarget:
     macOS: "14.0"
 packages:
-  WakeUpCore:
-    path: Packages/WakeUpCore
+  LidlessCore:
+    path: Packages/LidlessCore
 targets:
-  WakeUp:
+  Lidless:
     type: application
     platform: macOS
     deploymentTarget: "14.0"
@@ -23,15 +23,15 @@ targets:
       - path: Helper/watchdog.sh
         buildPhase:
           copyFiles: {destination: resources, subpath: Helper}
-      - path: Helper/app.wakeup.watchdog.plist
+      - path: Helper/app.lidless.watchdog.plist
         buildPhase:
           copyFiles: {destination: resources, subpath: Helper}
     dependencies:
-      - package: WakeUpCore
+      - package: LidlessCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.alexsarva.WakeUp
-        PRODUCT_NAME: WakeUp
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.alexsarva.Lidless
+        PRODUCT_NAME: Lidless
         SWIFT_VERSION: "6.0"
         CODE_SIGN_IDENTITY: "-"
         ENABLE_APP_SANDBOX: NO

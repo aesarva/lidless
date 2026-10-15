@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import WakeUpCore
+import LidlessCore
 
 @MainActor
 final class SettingsWindowController {
@@ -27,7 +27,7 @@ final class SettingsWindowController {
                 backing: .buffered,
                 defer: false
             )
-            window.title = String(localized: "WakeUp Settings")
+            window.title = String(localized: "Lidless Settings")
             window.contentView = NSHostingView(rootView: view)
             window.isReleasedWhenClosed = false
             window.center()

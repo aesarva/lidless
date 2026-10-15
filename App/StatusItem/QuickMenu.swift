@@ -1,5 +1,5 @@
 import AppKit
-import WakeUpCore
+import LidlessCore
 
 @MainActor
 enum QuickMenu {
@@ -40,7 +40,7 @@ enum QuickMenu {
         menu.addItem(.separator())
 
         menu.addItem(ActionItem(String(localized: "Settings…")) { onSettings(.general) })
-        let quit = ActionItem(String(localized: "Quit WakeUp")) { NSApp.terminate(nil) }
+        let quit = ActionItem(String(localized: "Quit Lidless")) { NSApp.terminate(nil) }
         quit.keyEquivalent = "q"
         quit.keyEquivalentModifierMask = .command
         menu.addItem(quit)

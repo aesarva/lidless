@@ -1,5 +1,5 @@
 import SwiftUI
-import WakeUpCore
+import LidlessCore
 
 @MainActor @Observable
 final class SettingsNavigation {

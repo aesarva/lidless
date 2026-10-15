@@ -1,5 +1,5 @@
 import SwiftUI
-import WakeUpCore
+import LidlessCore
 
 enum SettingsTab { case general, safety, helper, about }
 
@@ -63,9 +63,9 @@ struct PopoverView: View {
 }
 
 @MainActor private final class PreviewStore: SettingsStore {
-    var settings = WakeUpSettings()
-    func load() -> WakeUpSettings { settings }
-    func save(_ s: WakeUpSettings) { settings = s }
+    var settings = LidlessSettings()
+    func load() -> LidlessSettings { settings }
+    func save(_ s: LidlessSettings) { settings = s }
 }
 
 @MainActor private final class PreviewLid: LidSleepControlling {

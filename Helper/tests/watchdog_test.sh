@@ -8,7 +8,7 @@ trap 'rm -f "$M"' EXIT
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
-out=$(WAKEUP_MARKER="$M" WAKEUP_PROCESS_NAME="wakeup-no-such-proc-$$" bash "$WD" --dry-run)
+out=$(LIDLESS_MARKER="$M" LIDLESS_PROCESS_NAME="lidless-no-such-proc-$$" bash "$WD" --dry-run)
 [ "$out" = "reset" ] || fail "expected reset, got '$out'"
 [ ! -e "$M" ] || fail "marker should be removed"
 
@@ -17,12 +17,12 @@ sleep 30 &
 SLEEPER=$!
 trap 'kill "$SLEEPER" 2>/dev/null; wait "$SLEEPER" 2>/dev/null || true; rm -f "$M"' EXIT
 touch "$M"
-out=$(WAKEUP_MARKER="$M" WAKEUP_PROCESS_NAME="sleep" bash "$WD" --dry-run)
+out=$(LIDLESS_MARKER="$M" LIDLESS_PROCESS_NAME="sleep" bash "$WD" --dry-run)
 [ "$out" = "noop" ] || fail "expected noop (process alive), got '$out'"
 [ -e "$M" ] || fail "marker should remain"
 
 rm -f "$M"
-out=$(WAKEUP_MARKER="$M" WAKEUP_PROCESS_NAME="wakeup-no-such-proc-$$" bash "$WD" --dry-run)
+out=$(LIDLESS_MARKER="$M" LIDLESS_PROCESS_NAME="lidless-no-such-proc-$$" bash "$WD" --dry-run)
 [ "$out" = "noop" ] || fail "expected noop (no marker), got '$out'"
 
 # install.sh must reject bad user names (exit 4) before any privileged step.

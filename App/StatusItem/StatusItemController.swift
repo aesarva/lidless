@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import WakeUpCore
+import LidlessCore
 
 @MainActor
 final class StatusItemController {

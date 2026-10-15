@@ -1,5 +1,5 @@
 import SwiftUI
-import WakeUpCore
+import LidlessCore
 
 enum Tile {
     static let accent = Color(red: 1.0, green: 0.702, blue: 0.251) // #FFB340

@@ -1,4 +1,4 @@
-# WakeUp
+# Lidless
 
 A macOS menu-bar app that keeps your Mac awake, optionally with the lid closed.
 
@@ -12,38 +12,38 @@ Requires macOS 14 or later.
 
 ## Install
 
-1. Download `WakeUp.zip` from the GitHub Releases page and unzip it.
-2. Move `WakeUp.app` to `/Applications`.
+1. Download `Lidless.zip` from the GitHub Releases page and unzip it.
+2. Move `Lidless.app` to `/Applications`.
 3. The app is ad-hoc signed (not notarized), so Gatekeeper will block the first launch. Either right-click the app and choose **Open**, or remove the quarantine flag:
 
    ```
-   xattr -dr com.apple.quarantine /Applications/WakeUp.app
+   xattr -dr com.apple.quarantine /Applications/Lidless.app
    ```
 
 ## The helper (closed-lid mode)
 
-Normal sessions use a standard power assertion and need nothing extra. Closed-lid mode has to run `pmset -a disablesleep 1`, which requires root. On first use WakeUp asks for your administrator password once and installs:
+Normal sessions use a standard power assertion and need nothing extra. Closed-lid mode has to run `pmset -a disablesleep 1`, which requires root. On first use Lidless asks for your administrator password once and installs:
 
 | Path | Purpose |
 |---|---|
-| `/etc/sudoers.d/wakeup` | allows your user to run `/usr/bin/pmset -a disablesleep 0` and `... 1` without a password, and nothing else |
-| `/Library/PrivilegedHelperTools/app.wakeup.watchdog.sh` | watchdog script that restores normal sleep if WakeUp is gone |
-| `/Library/LaunchDaemons/app.wakeup.watchdog.plist` | launchd job (`app.wakeup.watchdog`) that runs the watchdog every 60 seconds and at load |
+| `/etc/sudoers.d/lidless` | allows your user to run `/usr/bin/pmset -a disablesleep 0` and `... 1` without a password, and nothing else |
+| `/Library/PrivilegedHelperTools/app.lidless.watchdog.sh` | watchdog script that restores normal sleep if Lidless is gone |
+| `/Library/LaunchDaemons/app.lidless.watchdog.plist` | launchd job (`app.lidless.watchdog`) that runs the watchdog every 60 seconds and at load |
 
-A marker file, `/Users/Shared/WakeUp/lid-mode.marker`, records that WakeUp turned closed-lid mode on. If WakeUp quits, crashes, or the Mac reboots mid-session, the watchdog sees the marker without a running app and runs `pmset -a disablesleep 0`.
+A marker file, `/Users/Shared/Lidless/lid-mode.marker`, records that Lidless turned closed-lid mode on. If Lidless quits, crashes, or the Mac reboots mid-session, the watchdog sees the marker without a running app and runs `pmset -a disablesleep 0`.
 
 ### Security model
 
 Be aware of what this does and does not protect against:
 
-- Until the app is signed with a Developer ID and the helper is registered through `SMAppService`, the helper scripts are copied from inside the app bundle at install time. That bundle is user-writable, so the install is only as trustworthy as the app you downloaded. Only install the helper from a copy of WakeUp you trust.
+- Until the app is signed with a Developer ID and the helper is registered through `SMAppService`, the helper scripts are copied from inside the app bundle at install time. That bundle is user-writable, so the install is only as trustworthy as the app you downloaded. Only install the helper from a copy of Lidless you trust.
 - After installation, the privileged pieces that run on their own (the sudoers rule and the watchdog) live in root-owned locations (the three paths above). Uninstall is the exception: it runs `uninstall.sh` from inside the app bundle as root, through the administrator password prompt, so it is only as trustworthy as the app bundle (see the first point).
-- If the helper stops working while closed-lid mode is on (for example, the sudoers file was removed), WakeUp may be unable to turn normal sleep back on when the session ends. It then keeps retrying every 15 seconds and shows an orange dot on the menu bar icon until sleep is restored. If the watchdog is still installed, it restores sleep once WakeUp quits.
+- If the helper stops working while closed-lid mode is on (for example, the sudoers file was removed), Lidless may be unable to turn normal sleep back on when the session ends. It then keeps retrying every 15 seconds and shows an orange dot on the menu bar icon until sleep is restored. If the watchdog is still installed, it restores sleep once Lidless quits.
 - The sudoers rule allows exactly `pmset -a disablesleep 0|1` and no other command or argument.
 
 ### Uninstall
 
-Open **Settings -> Helper -> Uninstall**, enter your password, then delete `WakeUp.app`. This removes the sudoers file, watchdog script, launchd job and marker, and restores normal sleep.
+Open **Settings -> Helper -> Uninstall**, enter your password, then delete `Lidless.app`. This removes the sudoers file, watchdog script, launchd job and marker, and restores normal sleep.
 
 ## Build
 
@@ -57,7 +57,7 @@ brew install xcodegen shellcheck
 make build     # generate the Xcode project and build (Debug)
 make run       # build and launch
 make test      # Swift package tests, shellcheck, watchdog script tests
-make release   # Release build, ad-hoc signed, build/WakeUp.zip
+make release   # Release build, ad-hoc signed, build/Lidless.zip
 ```
 
 ## Manual verification
@@ -66,19 +66,19 @@ These checks need a real MacBook and are not automated. Status: pending.
 
 1. 15-minute session with the lid open and "display may sleep": the display turns off, the system stays awake (`pmset -g assertions`).
 2. Closed-lid mode, no external display and no charger, lid closed for 5 minutes: `pmset -g log` shows no Sleep; an SSH session stays alive.
-3. Force Quit WakeUp while closed-lid mode is active: within 60 seconds `pmset -g` shows `SleepDisabled 0`.
-4. Reboot in the middle of a session without WakeUp launching at login: after boot `SleepDisabled 0`.
+3. Force Quit Lidless while closed-lid mode is active: within 60 seconds `pmset -g` shows `SleepDisabled 0`.
+4. Reboot in the middle of a session without Lidless launching at login: after boot `SleepDisabled 0`.
 5. Battery rule with a threshold above the current charge: the session stops and a notification appears.
 6. Uninstall the helper: the sudoers file, plist and script are removed and `SleepDisabled 0`.
 
 ## По-русски
 
-WakeUp - приложение в строке меню macOS, которое не даёт Mac уснуть, в том числе с закрытой крышкой.
+Lidless - приложение в строке меню macOS, которое не даёт Mac уснуть, в том числе с закрытой крышкой.
 
-**Установка.** Скачайте `WakeUp.zip` из GitHub Releases, распакуйте, перенесите `WakeUp.app` в «Программы». Приложение подписано ad-hoc и не нотаризовано: при первом запуске нажмите правой кнопкой -> «Открыть» или выполните `xattr -dr com.apple.quarantine /Applications/WakeUp.app`.
+**Установка.** Скачайте `Lidless.zip` из GitHub Releases, распакуйте, перенесите `Lidless.app` в «Программы». Приложение подписано ad-hoc и не нотаризовано: при первом запуске нажмите правой кнопкой -> «Открыть» или выполните `xattr -dr com.apple.quarantine /Applications/Lidless.app`.
 
-**Помощник.** Режим закрытой крышки требует прав root для `pmset -a disablesleep`. При первом включении WakeUp один раз запросит пароль администратора и установит `/etc/sudoers.d/wakeup` (разрешает только `pmset -a disablesleep 0|1`), сторожа `/Library/PrivilegedHelperTools/app.wakeup.watchdog.sh` и launchd-задачу `/Library/LaunchDaemons/app.wakeup.watchdog.plist`; маркер состояния - `/Users/Shared/WakeUp/lid-mode.marker`. Если WakeUp завершится аварийно, сторож вернёт обычный сон. Пока приложение не подписано Developer ID и не использует SMAppService, скрипты ставятся из пакета приложения, доступного пользователю на запись, поэтому установка настолько надёжна, насколько надёжно скачанное приложение; после установки всё выполняется из каталогов, принадлежащих root.
+**Помощник.** Режим закрытой крышки требует прав root для `pmset -a disablesleep`. При первом включении Lidless один раз запросит пароль администратора и установит `/etc/sudoers.d/lidless` (разрешает только `pmset -a disablesleep 0|1`), сторожа `/Library/PrivilegedHelperTools/app.lidless.watchdog.sh` и launchd-задачу `/Library/LaunchDaemons/app.lidless.watchdog.plist`; маркер состояния - `/Users/Shared/Lidless/lid-mode.marker`. Если Lidless завершится аварийно, сторож вернёт обычный сон. Пока приложение не подписано Developer ID и не использует SMAppService, скрипты ставятся из пакета приложения, доступного пользователю на запись, поэтому установка настолько надёжна, насколько надёжно скачанное приложение; после установки всё выполняется из каталогов, принадлежащих root.
 
-**Удаление.** Настройки -> Помощник -> Удалить, затем удалите `WakeUp.app`.
+**Удаление.** Настройки -> Помощник -> Удалить, затем удалите `Lidless.app`.
 
 **Сборка.** `make build`, `make test`, `make release`; нужны Xcode 16+ и `brew install xcodegen shellcheck`.

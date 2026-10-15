@@ -2,8 +2,8 @@
 set -euo pipefail
 export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
-MARKER=${WAKEUP_MARKER:-/Users/Shared/WakeUp/lid-mode.marker}
-PROC=${WAKEUP_PROCESS_NAME:-WakeUp}
+MARKER=${LIDLESS_MARKER:-/Users/Shared/Lidless/lid-mode.marker}
+PROC=${LIDLESS_PROCESS_NAME:-Lidless}
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 

@@ -1,5 +1,5 @@
 import SwiftUI
-import WakeUpCore
+import LidlessCore
 
 struct GeneralTab: View {
     @Bindable var controller: SessionController
@@ -52,7 +52,7 @@ struct GeneralTab: View {
             }
 
             Toggle("Show remaining time in menu bar", isOn: $controller.settings.showTimerInMenuBar)
-            Toggle("Start a session when WakeUp launches", isOn: $controller.settings.startSessionOnLaunch)
+            Toggle("Start a session when Lidless launches", isOn: $controller.settings.startSessionOnLaunch)
         }
         .formStyle(.grouped)
     }

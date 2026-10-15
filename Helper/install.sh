@@ -21,7 +21,7 @@ fi
 
 # /Users/Shared is world-writable: refuse a pre-planted symlink or foreign-owned
 # directory before root chowns anything (exit 5).
-SHARED_DIR=/Users/Shared/WakeUp
+SHARED_DIR=/Users/Shared/Lidless
 if [ -L "$SHARED_DIR" ]; then
     echo "$SHARED_DIR is a symlink" >&2
     exit 5
@@ -39,7 +39,7 @@ if [ -e "$SHARED_DIR" ]; then
 fi
 
 umask 077
-tmp=$(mktemp /private/tmp/wakeup.XXXXXX)
+tmp=$(mktemp /private/tmp/lidless.XXXXXX)
 trap 'rm -f "$tmp"' EXIT
 printf '%s' "$RULE" > "$tmp"
 
@@ -54,14 +54,14 @@ if ! visudo -cf "$tmp" >/dev/null; then
 fi
 
 install -d -m 0755 -o root -g wheel /Library/PrivilegedHelperTools /Library/LaunchDaemons
-install -m 0755 -o root -g wheel "$HELPER_DIR/watchdog.sh" /Library/PrivilegedHelperTools/app.wakeup.watchdog.sh
-install -m 0644 -o root -g wheel "$HELPER_DIR/app.wakeup.watchdog.plist" /Library/LaunchDaemons/app.wakeup.watchdog.plist
+install -m 0755 -o root -g wheel "$HELPER_DIR/watchdog.sh" /Library/PrivilegedHelperTools/app.lidless.watchdog.sh
+install -m 0644 -o root -g wheel "$HELPER_DIR/app.lidless.watchdog.plist" /Library/LaunchDaemons/app.lidless.watchdog.plist
 
-launchctl bootout system/app.wakeup.watchdog 2>/dev/null || true
-launchctl bootstrap system /Library/LaunchDaemons/app.wakeup.watchdog.plist
+launchctl bootout system/app.lidless.watchdog 2>/dev/null || true
+launchctl bootstrap system /Library/LaunchDaemons/app.lidless.watchdog.plist
 
 mkdir -p "$SHARED_DIR"
 chown -h "$USER_NAME" "$SHARED_DIR"
 
 # Sudoers rule goes in LAST: it must never exist without the watchdog safety net.
-install -m 0440 -o root -g wheel "$tmp" /etc/sudoers.d/wakeup
+install -m 0440 -o root -g wheel "$tmp" /etc/sudoers.d/lidless

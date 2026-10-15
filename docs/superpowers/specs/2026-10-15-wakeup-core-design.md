@@ -1,5 +1,7 @@
 # WakeUp — этап 1: ядро
 
+> **2026-10-16:** приложение переименовано в **Lidless**. Все идентификаторы в коде заменены по схеме `WakeUp`→`Lidless`, `wakeup`→`lidless` (Bundle ID `io.github.alexsarva.Lidless`, пакет `LidlessCore`, `/etc/sudoers.d/lidless`, label `app.lidless.watchdog`, маркер `/Users/Shared/Lidless/lid-mode.marker`). Ниже — исходный текст без изменений.
+
 Дата: 2026-10-15
 Статус: черновик на ревью
 

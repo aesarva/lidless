@@ -1,5 +1,7 @@
 # WakeUp Core (этап 1) Implementation Plan
 
+> **2026-10-16:** приложение переименовано в **Lidless**. Все идентификаторы в коде заменены по схеме `WakeUp`→`Lidless`, `wakeup`→`lidless` (Bundle ID `io.github.alexsarva.Lidless`, пакет `LidlessCore`, `/etc/sudoers.d/lidless`, label `app.lidless.watchdog`, маркер `/Users/Shared/Lidless/lid-mode.marker`). Ниже — исходный текст без изменений.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Нативное приложение строки меню macOS «WakeUp», которое держит Mac бодрствующим (в том числе с закрытой крышкой через `pmset disablesleep`), с защитой батареи/нагрева, сторожем от падений и поповером из плиток.

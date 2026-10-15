@@ -1,5 +1,5 @@
 import SwiftUI
-import WakeUpCore
+import LidlessCore
 
 struct SafetyTab: View {
     @Bindable var controller: SessionController

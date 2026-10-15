@@ -1,5 +1,5 @@
 import AppKit
-import WakeUpCore
+import LidlessCore
 
 /// Draws the "pulse" icon set. Geometry is ported from the 24x24 SVG symbols
 /// (p0, p1, ptimer, plid, pwarn); drawing uses a flipped (y-down) context so

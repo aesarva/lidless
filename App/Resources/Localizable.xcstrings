@@ -121,12 +121,12 @@
         }
       }
     },
-    "Closed-lid mode needs a one-time administrator password to allow WakeUp to run exactly one command: pmset disablesleep. A background watchdog restores normal sleep if WakeUp quits unexpectedly.": {
+    "Closed-lid mode needs a one-time administrator password to allow Lidless to run exactly one command: pmset disablesleep. A background watchdog restores normal sleep if Lidless quits unexpectedly.": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Для режима закрытой крышки один раз нужен пароль администратора, чтобы разрешить WakeUp выполнять ровно одну команду: pmset disablesleep. Фоновый сторож вернёт обычный сон, если WakeUp неожиданно завершится."
+            "value": "Для режима закрытой крышки один раз нужен пароль администратора, чтобы разрешить Lidless выполнять ровно одну команду: pmset disablesleep. Фоновый сторож вернёт обычный сон, если Lidless неожиданно завершится."
           }
         }
       }
@@ -381,12 +381,12 @@
         }
       }
     },
-    "Quit WakeUp": {
+    "Quit Lidless": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Выйти из WakeUp"
+            "value": "Выйти из Lidless"
           }
         }
       }
@@ -451,12 +451,12 @@
         }
       }
     },
-    "Start a session when WakeUp launches": {
+    "Start a session when Lidless launches": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Начинать сессию при запуске WakeUp"
+            "value": "Начинать сессию при запуске Lidless"
           }
         }
       }
@@ -581,32 +581,32 @@
         }
       }
     },
-    "WakeUp Settings": {
+    "Lidless Settings": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Настройки WakeUp"
+            "value": "Настройки Lidless"
           }
         }
       }
     },
-    "WakeUp ends in 5 minutes": {
+    "Lidless ends in 5 minutes": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "WakeUp выключится через 5 минут"
+            "value": "Lidless выключится через 5 минут"
           }
         }
       }
     },
-    "WakeUp session ended": {
+    "Lidless session ended": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Сессия WakeUp завершена"
+            "value": "Сессия Lidless завершена"
           }
         }
       }

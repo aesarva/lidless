@@ -1,7 +1,7 @@
 import Foundation
 import os
 @preconcurrency import UserNotifications
-import WakeUpCore
+import LidlessCore
 
 @MainActor
 final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
@@ -12,7 +12,7 @@ final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
     /// Current safety settings, read at post time (thresholds are user-configurable).
     var safetySettings: () -> SafetySettings = { SafetySettings() }
     private let center = UNUserNotificationCenter.current()
-    private let log = Logger(subsystem: "io.github.alexsarva.WakeUp", category: "ui")
+    private let log = Logger(subsystem: "io.github.alexsarva.Lidless", category: "ui")
 
     override init() {
         super.init()
@@ -33,7 +33,7 @@ final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
         case .endingSoon(let endsAt):
             id = Self.endingSoonID
             let time = endsAt.formatted(date: .omitted, time: .shortened)
-            content.title = String(localized: "WakeUp ends in 5 minutes")
+            content.title = String(localized: "Lidless ends in 5 minutes")
             content.body = String(localized: "Mac can sleep after \(time).")
             content.categoryIdentifier = Self.categoryID
         case .sessionEnded(let reason):
@@ -44,7 +44,7 @@ final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
             case .safety(.thermal):
                 content.title = String(localized: "Stopped: Mac is overheating with the lid closed")
             default:
-                content.title = String(localized: "WakeUp session ended")
+                content.title = String(localized: "Lidless session ended")
             }
         case .lidModeSuspended(let reason):
             switch reason {

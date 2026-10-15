@@ -1,5 +1,5 @@
 import SwiftUI
-import WakeUpCore
+import LidlessCore
 
 struct HelperTab: View {
     let controller: SessionController
@@ -31,7 +31,7 @@ struct HelperTab: View {
                 }
             }
             Section {
-                Text("Closed-lid mode needs a one-time administrator password to allow WakeUp to run exactly one command: pmset disablesleep. A background watchdog restores normal sleep if WakeUp quits unexpectedly.")
+                Text("Closed-lid mode needs a one-time administrator password to allow Lidless to run exactly one command: pmset disablesleep. A background watchdog restores normal sleep if Lidless quits unexpectedly.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

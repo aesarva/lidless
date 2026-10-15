@@ -1,5 +1,5 @@
 import SwiftUI
-import WakeUpCore
+import LidlessCore
 
 enum DurationFormat {
     /// Minutes < 60 -> "15 min"; multiples of 60 -> "3 h"; otherwise "1 h 30 min".

@@ -1,5 +1,5 @@
 import AppKit
-import WakeUpCore
+import LidlessCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {

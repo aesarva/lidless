@@ -1,6 +1,6 @@
 import Foundation
 import Observation
-import WakeUpCore
+import LidlessCore
 
 /// Observable wrapper around the privileged backend for the UI (helper install state).
 @MainActor @Observable final class HelperModel {
