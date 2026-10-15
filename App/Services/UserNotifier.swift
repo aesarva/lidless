@@ -9,6 +9,8 @@ final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
     private static let categoryID = "ENDING_SOON"
 
     var onExtend: ((Int) -> Void)?
+    /// Current safety settings, read at post time (thresholds are user-configurable).
+    var safetySettings: () -> SafetySettings = { SafetySettings() }
     private let center = UNUserNotificationCenter.current()
     private let log = Logger(subsystem: "io.github.alexsarva.WakeUp", category: "ui")
 
@@ -28,20 +30,34 @@ final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
         let content = UNMutableNotificationContent()
         var id = UUID().uuidString
         switch n {
-        case .endingSoon:
+        case .endingSoon(let endsAt):
             id = Self.endingSoonID
-            content.title = String(localized: "WakeUp ends soon")
-            content.body = String(localized: "Your Mac will be allowed to sleep in 5 minutes.")
+            let time = endsAt.formatted(date: .omitted, time: .shortened)
+            content.title = String(localized: "WakeUp ends in 5 minutes")
+            content.body = String(localized: "Mac can sleep after \(time).")
             content.categoryIdentifier = Self.categoryID
-        case .sessionEnded:
-            content.title = String(localized: "WakeUp turned off")
-            content.body = String(localized: "Your Mac can sleep again.")
-        case .lidModeSuspended:
-            content.title = String(localized: "Closed-lid mode suspended")
-            content.body = String(localized: "A safety rule turned it off.")
-        case .assertionFailed:
-            content.title = String(localized: "WakeUp could not start")
-            content.body = String(localized: "The sleep assertion failed.")
+        case .sessionEnded(let reason):
+            switch reason {
+            case .safety(.lowBattery):
+                let threshold = safetySettings().batteryThreshold
+                content.title = String(localized: "Stopped: battery below \(threshold)%")
+            case .safety(.thermal):
+                content.title = String(localized: "Stopped: Mac is overheating with the lid closed")
+            default:
+                content.title = String(localized: "WakeUp session ended")
+            }
+        case .lidModeSuspended(let reason):
+            switch reason {
+            case .thermal:
+                content.title = String(localized: "Closed-lid mode paused: Mac is getting hot")
+            case .lidOnBatteryLimit:
+                let limit = DurationFormat.label(minutes: safetySettings().lidLimitMinutes)
+                content.title = String(localized: "Closed-lid mode paused after \(limit) on battery")
+            case .helperUnavailable, .lowBattery:
+                content.title = String(localized: "Closed-lid mode unavailable — reinstall the helper in Settings")
+            }
+        case .assertionFailed(let message):
+            content.title = String(localized: "Couldn't keep Mac awake: \(message)")
         }
         let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         let center = self.center

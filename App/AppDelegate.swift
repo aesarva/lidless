@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             clock: clock
         )
         self.controller = controller
+        notifier.safetySettings = { [weak controller] in controller?.settings.safety ?? SafetySettings() }
         notifier.onExtend = { [weak controller] minutes in controller?.extend(byMinutes: minutes) }
 
         engine = SafetyEngine(

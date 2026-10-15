@@ -36,3 +36,5 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         ENABLE_APP_SANDBOX: NO
         INFOPLIST_FILE: App/Resources/Info.plist
+        SWIFT_EMIT_LOC_STRINGS: YES
+        LOCALIZATION_PREFERS_STRING_CATALOGS: YES

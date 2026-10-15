@@ -16,3 +16,9 @@ build: generate
 
 run: build
 	open build/Build/Products/Debug/WakeUp.app
+
+.PHONY: release
+release: generate
+	xcodebuild -project WakeUp.xcodeproj -scheme WakeUp -configuration Release -derivedDataPath build build
+	codesign --force --deep -s - build/Build/Products/Release/WakeUp.app
+	ditto -c -k --keepParent build/Build/Products/Release/WakeUp.app build/WakeUp.zip

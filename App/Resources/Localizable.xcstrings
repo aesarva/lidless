@@ -1,0 +1,746 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "%@ left · until %@": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ещё %@ · до %@"
+          }
+        }
+      }
+    },
+    "%lld h": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld ч"
+          }
+        }
+      }
+    },
+    "%lld h %lld min": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld ч %lld мин"
+          }
+        }
+      }
+    },
+    "%lld min": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld мин"
+          }
+        }
+      }
+    },
+    "%lld%%": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld%%"
+          }
+        }
+      }
+    },
+    "+1 h": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+1 ч"
+          }
+        }
+      }
+    },
+    "+30 min": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "+30 мин"
+          }
+        }
+      }
+    },
+    "About": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "О программе"
+          }
+        }
+      }
+    },
+    "Add": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Добавить"
+          }
+        }
+      }
+    },
+    "Awake": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не сплю"
+          }
+        }
+      }
+    },
+    "Battery below %lld%% — connect power or change the limit": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Заряд ниже %lld%% — подключите питание или измените порог"
+          }
+        }
+      }
+    },
+    "Closed-Lid Mode": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Закрытая крышка"
+          }
+        }
+      }
+    },
+    "Closed-lid mode needs a one-time administrator password to allow WakeUp to run exactly one command: pmset disablesleep. A background watchdog restores normal sleep if WakeUp quits unexpectedly.": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Для режима закрытой крышки один раз нужен пароль администратора, чтобы разрешить WakeUp выполнять ровно одну команду: pmset disablesleep. Фоновый сторож вернёт обычный сон, если WakeUp неожиданно завершится."
+          }
+        }
+      }
+    },
+    "Closed-lid mode paused after %@ on battery": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Режим крышки на паузе: %@ на батарее"
+          }
+        }
+      }
+    },
+    "Closed-lid mode paused: Mac is getting hot": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Режим крышки на паузе: Mac нагревается"
+          }
+        }
+      }
+    },
+    "Closed-lid mode unavailable — reinstall the helper in Settings": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Режим крышки недоступен — переустановите помощника в настройках"
+          }
+        }
+      }
+    },
+    "Could not change the launch-at-login setting": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось изменить автозапуск при входе"
+          }
+        }
+      }
+    },
+    "Could not install the helper": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось установить помощника"
+          }
+        }
+      }
+    },
+    "Couldn't keep Mac awake: %@": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось запретить сон: %@"
+          }
+        }
+      }
+    },
+    "Default duration": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Длительность по умолчанию"
+          }
+        }
+      }
+    },
+    "Display": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Экран"
+          }
+        }
+      }
+    },
+    "Duration": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Длительность"
+          }
+        }
+      }
+    },
+    "Error: %@": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ошибка: %@"
+          }
+        }
+      }
+    },
+    "General": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Основные"
+          }
+        }
+      }
+    },
+    "Helper": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Помощник"
+          }
+        }
+      }
+    },
+    "Indefinitely": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Бессрочно"
+          }
+        }
+      }
+    },
+    "Installed": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Установлен"
+          }
+        }
+      }
+    },
+    "Install…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Установить…"
+          }
+        }
+      }
+    },
+    "Keep Display On": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Экран не гаснет"
+          }
+        }
+      }
+    },
+    "Launch at login": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Запускать при входе"
+          }
+        }
+      }
+    },
+    "Lid": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Крышка"
+          }
+        }
+      }
+    },
+    "Limit closed-lid time": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ограничить время с закрытой крышкой"
+          }
+        }
+      }
+    },
+    "Mac can sleep after %@.": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "После %@ Mac сможет уснуть."
+          }
+        }
+      }
+    },
+    "Not installed": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не установлен"
+          }
+        }
+      }
+    },
+    "OK": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "Off": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выключено"
+          }
+        }
+      }
+    },
+    "Presets": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Пресеты"
+          }
+        }
+      }
+    },
+    "Quit": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выйти"
+          }
+        }
+      }
+    },
+    "Quit WakeUp": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выйти из WakeUp"
+          }
+        }
+      }
+    },
+    "Remove preset": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Удалить пресет"
+          }
+        }
+      }
+    },
+    "Safety": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Безопасность"
+          }
+        }
+      }
+    },
+    "Settings": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Настройки"
+          }
+        }
+      }
+    },
+    "Settings…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Настройки…"
+          }
+        }
+      }
+    },
+    "Show remaining time in menu bar": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Показывать оставшееся время в строке меню"
+          }
+        }
+      }
+    },
+    "Start": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Старт"
+          }
+        }
+      }
+    },
+    "Start a session when WakeUp launches": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Начинать сессию при запуске WakeUp"
+          }
+        }
+      }
+    },
+    "Status": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Статус"
+          }
+        }
+      }
+    },
+    "Stopped: Mac is overheating with the lid closed": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Остановлено: Mac перегревается с закрытой крышкой"
+          }
+        }
+      }
+    },
+    "Stopped: battery below %lld%%": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Остановлено: заряд ниже %lld%%"
+          }
+        }
+      }
+    },
+    "Thermal": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нагрев"
+          }
+        }
+      }
+    },
+    "Triggers when macOS reports serious or critical thermal pressure.": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Срабатывает, когда macOS сообщает о серьёзном или критическом нагреве."
+          }
+        }
+      }
+    },
+    "Turn Off": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выключить"
+          }
+        }
+      }
+    },
+    "Turn On": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Включить"
+          }
+        }
+      }
+    },
+    "Turn off on low battery": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выключать при низком заряде"
+          }
+        }
+      }
+    },
+    "Turn off when the Mac overheats": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выключать при перегреве Mac"
+          }
+        }
+      }
+    },
+    "Uninstall…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Удалить…"
+          }
+        }
+      }
+    },
+    "Until…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "До…"
+          }
+        }
+      }
+    },
+    "Version %@": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Версия %@"
+          }
+        }
+      }
+    },
+    "WakeUp Settings": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Настройки WakeUp"
+          }
+        }
+      }
+    },
+    "WakeUp ends in 5 minutes": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WakeUp выключится через 5 минут"
+          }
+        }
+      }
+    },
+    "WakeUp session ended": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сессия WakeUp завершена"
+          }
+        }
+      }
+    },
+    "elevated": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "повышен"
+          }
+        }
+      }
+    },
+    "high": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "высокий"
+          }
+        }
+      }
+    },
+    "keeps awake": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "не усыпляет"
+          }
+        }
+      }
+    },
+    "may sleep": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "может гаснуть"
+          }
+        }
+      }
+    },
+    "needs helper": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "нужен помощник"
+          }
+        }
+      }
+    },
+    "normal": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "норма"
+          }
+        }
+      }
+    },
+    "off": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "выключено"
+          }
+        }
+      }
+    },
+    "paused: battery time limit": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "пауза: лимит на батарее"
+          }
+        }
+      }
+    },
+    "paused: helper error": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "пауза: ошибка помощника"
+          }
+        }
+      }
+    },
+    "paused: overheating": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "пауза: перегрев"
+          }
+        }
+      }
+    },
+    "rule off": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "правило выкл."
+          }
+        }
+      }
+    },
+    "stays on": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "не гаснет"
+          }
+        }
+      }
+    },
+    "stop at %lld%%": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "стоп при %lld%%"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}
