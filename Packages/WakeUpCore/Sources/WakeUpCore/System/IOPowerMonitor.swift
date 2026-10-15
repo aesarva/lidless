@@ -23,7 +23,7 @@ import os
             return PowerReading(batteryLevel: nil, onBattery: false)
         }
         let onBattery: Bool = {
-            guard let type = IOPSGetProvidingPowerSourceType(info)?.takeRetainedValue() as String? else { return false }
+            guard let type = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String? else { return false }
             return type == kIOPSBatteryPowerValue
         }()
 
