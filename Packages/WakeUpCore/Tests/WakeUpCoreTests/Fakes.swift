@@ -56,3 +56,59 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
     }
     func isSleepDisabled() throws -> Bool { lock.lock(); defer { lock.unlock() }; return _setCalls.last ?? false }
 }
+
+// MARK: - Session controller fakes
+
+final class MutableClock: WakeClock, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _now: Date
+    init(_ start: Date) { _now = start }
+    var now: Date { lock.lock(); defer { lock.unlock() }; return _now }
+    func advance(_ seconds: TimeInterval) {
+        lock.lock(); defer { lock.unlock() }
+        _now = _now.addingTimeInterval(seconds)
+    }
+}
+
+struct FakeError: Error {}
+
+@MainActor final class FakeAssertions: SleepAssertionService {
+    var acquired: [Bool] = []
+    var released = 0
+    var failNext = false
+    func acquire(keepDisplayOn: Bool) throws {
+        if failNext { failNext = false; throw FakeError() }
+        acquired.append(keepDisplayOn)
+    }
+    func release() { released += 1 }
+}
+
+@MainActor final class FakeNotifier: Notifier {
+    var posted: [WakeNotification] = []
+    var cancelEndingSoonCount = 0
+    func post(_ n: WakeNotification) { posted.append(n) }
+    func cancelEndingSoon() { cancelEndingSoonCount += 1 }
+}
+
+@MainActor final class FakeLid: LidSleepControlling {
+    var enableCalls = 0
+    var disableCalls = 0
+    var recoverCalls = 0
+    var failEnable = false
+    var status: HelperStatus = .installed
+    func helperStatus() -> HelperStatus { status }
+    func enable() throws {
+        enableCalls += 1
+        if failEnable { throw FakeError() }
+    }
+    func disable() throws { disableCalls += 1 }
+    func recoverIfNeeded() { recoverCalls += 1 }
+}
+
+@MainActor final class MemorySettingsStore: SettingsStore {
+    var stored: WakeUpSettings
+    var saveCount = 0
+    init(_ initial: WakeUpSettings = WakeUpSettings()) { stored = initial }
+    func load() -> WakeUpSettings { stored }
+    func save(_ s: WakeUpSettings) { stored = s; saveCount += 1 }
+}
