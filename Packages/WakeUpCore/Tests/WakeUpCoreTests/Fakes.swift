@@ -95,13 +95,17 @@ struct FakeError: Error {}
     var disableCalls = 0
     var recoverCalls = 0
     var failEnable = false
+    var failDisable = false
     var status: HelperStatus = .installed
     func helperStatus() -> HelperStatus { status }
     func enable() throws {
         enableCalls += 1
         if failEnable { throw FakeError() }
     }
-    func disable() throws { disableCalls += 1 }
+    func disable() throws {
+        disableCalls += 1
+        if failDisable { throw FakeError() }
+    }
     func recoverIfNeeded() { recoverCalls += 1 }
 }
 

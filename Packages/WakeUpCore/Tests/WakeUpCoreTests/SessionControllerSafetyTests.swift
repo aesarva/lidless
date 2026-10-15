@@ -112,4 +112,36 @@ struct SessionControllerSafetyTests {
         c.clearAttention()
         #expect(c.attention == nil)
     }
+
+    @Test func suspendDisableFailureKeepsLidActiveAndRetriesOnStop() {
+        startWithLid()
+        lid.failDisable = true
+        c.update(readings: readings(thermal: .serious))
+        c.update(readings: readings(thermal: .serious))
+        #expect(c.session?.lidModeActive == true)
+        #expect(c.session?.lidModeSuspendedReason == nil)
+        #expect(c.attention == .helperUnavailable)
+        let n = notifier.posted.filter { $0 == .lidModeSuspended(.helperUnavailable) }.count
+        #expect(n == 1)
+        let before = lid.disableCalls
+        lid.failDisable = false
+        c.stop(.user)
+        #expect(lid.disableCalls == before + 1)
+    }
+
+    @Test func setLidModeOffDisableFailureKeepsLidActive() {
+        startWithLid()
+        lid.failDisable = true
+        c.setLidMode(false)
+        #expect(c.session?.lidModeActive == true)
+        #expect(c.attention == .helperUnavailable)
+    }
+
+    @Test func setLidModeOnWhileActiveIsNoop() {
+        startWithLid()
+        clock.advance(60)
+        c.setLidMode(true)
+        #expect(lid.enableCalls == 1)
+        #expect(c.session?.lidModeEnabledAt == t0)
+    }
 }

@@ -12,6 +12,8 @@ import os
     @ObservationIgnored private let clock: WakeClock
     @ObservationIgnored private let log = Logger(subsystem: "io.github.alexsarva.WakeUp", category: "session")
 
+    @ObservationIgnored private let safetyLog = Logger(subsystem: "io.github.alexsarva.WakeUp", category: "safety")
+
     public private(set) var state: SessionState = .off
     public private(set) var attention: SafetyReason?
     public private(set) var startBlock: StartBlock?
@@ -68,13 +70,7 @@ import os
         guard case .active(let s) = state else { return }
         assertions.release()
         if s.lidModeActive {
-            do {
-                try lid.disable()
-            } catch {
-                log.error("lid disable failed: \(String(describing: error))")
-                attention = .helperUnavailable
-                notifier.post(.lidModeSuspended(.helperUnavailable))
-            }
+            _ = disableLidHandlingFailure()
         }
         notifier.cancelEndingSoon()
         switch reason {
@@ -132,14 +128,16 @@ import os
 
     public func setLidMode(_ on: Bool) {
         settings.lidModeEnabled = on
-        guard session != nil else { return }
+        guard let s = session else { return }
         if on {
+            guard !s.lidModeActive else { return }
             enableLidMode()
         } else {
-            try? lid.disable()
-            mutateSession {
-                $0.lidModeActive = false
-                $0.lidModeSuspendedReason = nil
+            if disableLidHandlingFailure() {
+                mutateSession {
+                    $0.lidModeActive = false
+                    $0.lidModeSuspendedReason = nil
+                }
             }
         }
     }
@@ -169,13 +167,14 @@ import os
             attention = r
             stop(.safety(r))
         case .suspendLidMode(let r):
-            try? lid.disable()
-            mutateSession {
-                $0.lidModeActive = false
-                $0.lidModeSuspendedReason = r
+            if disableLidHandlingFailure() {
+                mutateSession {
+                    $0.lidModeActive = false
+                    $0.lidModeSuspendedReason = r
+                }
+                attention = r
+                notifier.post(.lidModeSuspended(r))
             }
-            attention = r
-            notifier.post(.lidModeSuspended(r))
         }
     }
 
@@ -192,6 +191,22 @@ import os
 
     // MARK: - Private
 
+    /// Disables lid mode. On failure the caller's state stays untouched (pmset may still be 1),
+    /// `.helperUnavailable` is raised and posted once. Returns true on success.
+    private func disableLidHandlingFailure() -> Bool {
+        do {
+            try lid.disable()
+            return true
+        } catch {
+            safetyLog.error("lid disable failed: \(String(describing: error), privacy: .public)")
+            if attention != .helperUnavailable {
+                attention = .helperUnavailable
+                notifier.post(.lidModeSuspended(.helperUnavailable))
+            }
+            return false
+        }
+    }
+
     private func enableLidMode() {
         do {
             try lid.enable()
@@ -203,8 +218,7 @@ import os
         } catch {
             log.error("lid enable failed: \(String(describing: error))")
             mutateSession {
-                $0.lidModeActive = false
-                $0.lidModeSuspendedReason = .helperUnavailable
+                if !$0.lidModeActive { $0.lidModeSuspendedReason = .helperUnavailable }
             }
             attention = .helperUnavailable
             notifier.post(.lidModeSuspended(.helperUnavailable))
