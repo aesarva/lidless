@@ -1,0 +1,38 @@
+name: WakeUp
+options:
+  bundleIdPrefix: io.github.alexsarva
+  deploymentTarget:
+    macOS: "14.0"
+packages:
+  WakeUpCore:
+    path: Packages/WakeUpCore
+targets:
+  WakeUp:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: App
+      # Explicit files (not the folder) so Helper/tests/ is not bundled.
+      - path: Helper/install.sh
+        buildPhase:
+          copyFiles: {destination: resources, subpath: Helper}
+      - path: Helper/uninstall.sh
+        buildPhase:
+          copyFiles: {destination: resources, subpath: Helper}
+      - path: Helper/watchdog.sh
+        buildPhase:
+          copyFiles: {destination: resources, subpath: Helper}
+      - path: Helper/app.wakeup.watchdog.plist
+        buildPhase:
+          copyFiles: {destination: resources, subpath: Helper}
+    dependencies:
+      - package: WakeUpCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.alexsarva.WakeUp
+        PRODUCT_NAME: WakeUp
+        SWIFT_VERSION: "6.0"
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_APP_SANDBOX: NO
+        INFOPLIST_FILE: App/Resources/Info.plist
