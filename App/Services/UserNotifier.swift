@@ -1,5 +1,6 @@
 import Foundation
-import UserNotifications
+import os
+@preconcurrency import UserNotifications
 import WakeUpCore
 
 @MainActor
@@ -9,7 +10,7 @@ final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
 
     var onExtend: ((Int) -> Void)?
     private let center = UNUserNotificationCenter.current()
-    private var authorizationRequested = false
+    private let log = Logger(subsystem: "io.github.alexsarva.WakeUp", category: "ui")
 
     override init() {
         super.init()
@@ -24,7 +25,6 @@ final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
     }
 
     func post(_ n: WakeNotification) {
-        requestAuthorizationIfNeeded()
         let content = UNMutableNotificationContent()
         var id = UUID().uuidString
         switch n {
@@ -43,18 +43,29 @@ final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
             content.title = String(localized: "WakeUp could not start")
             content.body = String(localized: "The sleep assertion failed.")
         }
-        center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+        let center = self.center
+        let log = self.log
+        center.getNotificationSettings { settings in
+            let add: @Sendable () -> Void = {
+                center.add(request) { error in
+                    if let error { log.error("notification add failed: \(error.localizedDescription, privacy: .public)") }
+                }
+            }
+            if settings.authorizationStatus == .notDetermined {
+                center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+                    if let error { log.error("notification authorization failed: \(error.localizedDescription, privacy: .public)") }
+                    if granted { add() } else { log.info("notification authorization not granted") }
+                }
+            } else {
+                add()
+            }
+        }
     }
 
     func cancelEndingSoon() {
         center.removePendingNotificationRequests(withIdentifiers: [Self.endingSoonID])
         center.removeDeliveredNotifications(withIdentifiers: [Self.endingSoonID])
-    }
-
-    private func requestAuthorizationIfNeeded() {
-        guard !authorizationRequested else { return }
-        authorizationRequested = true
-        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
     nonisolated func userNotificationCenter(
