@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var controller: SessionController!
     private(set) var engine: SafetyEngine!
     private var statusItem: StatusItemController!
+    private var settingsWindow: SettingsWindowController!
     private var notifier: UserNotifier!
     private var tickTimer: Timer?
 
@@ -35,10 +36,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onReadings: { [weak controller] readings in controller?.update(readings: readings) }
         )
 
+        let helper = HelperModel(backend: backend)
+        settingsWindow = SettingsWindowController(controller: controller, helper: helper)
         statusItem = StatusItemController(
             controller: controller,
-            helper: HelperModel(backend: backend),
-            openSettings: { _ in /* Task 13 wires SettingsWindowController.show(tab:) */ }
+            helper: helper,
+            openSettings: { [weak self] tab in self?.settingsWindow.show(tab: tab) }
         )
         controller.recoverAtLaunch()
         engine.start()

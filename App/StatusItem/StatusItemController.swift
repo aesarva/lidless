@@ -9,12 +9,18 @@ final class StatusItemController {
     private let popover = NSPopover()
     private let item: NSStatusItem
     private var lastPresentation: StatusPresentation?
+    private let openSettings: (SettingsTab) -> Void
 
     init(controller: SessionController, helper: HelperModel, openSettings: @escaping (SettingsTab) -> Void) {
         self.controller = controller
         self.helper = helper
+        self.openSettings = openSettings
+        let popover = self.popover
         let host = NSHostingController(
-            rootView: PopoverView(controller: controller, helper: helper, openSettings: openSettings)
+            rootView: PopoverView(controller: controller, helper: helper) { tab in
+                popover.performClose(nil)
+                openSettings(tab)
+            }
         )
         host.sizingOptions = .preferredContentSize
         popover.behavior = .transient
@@ -53,7 +59,7 @@ final class StatusItemController {
     @objc private func clicked() {
         if NSApp.currentEvent?.type == .rightMouseUp {
             popover.performClose(nil)
-            item.menu = QuickMenu.build(controller: controller)
+            item.menu = QuickMenu.build(controller: controller) { [openSettings] in openSettings(.general) }
             item.button?.performClick(nil)
             item.menu = nil
         } else {
