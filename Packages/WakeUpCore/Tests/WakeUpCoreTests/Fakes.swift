@@ -29,3 +29,30 @@ final class FakeCommandRunner: CommandRunner, @unchecked Sendable {
         return _responses[([executable] + arguments).joined(separator: " ")] ?? _fallback
     }
 }
+
+final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _status: HelperStatus = .installed
+    private var _failNextSet: HelperError?
+    private var _setCalls: [Bool] = []
+
+    var stubStatus: HelperStatus {
+        get { lock.lock(); defer { lock.unlock() }; return _status }
+        set { lock.lock(); defer { lock.unlock() }; _status = newValue }
+    }
+    var failNextSet: HelperError? {
+        get { lock.lock(); defer { lock.unlock() }; return _failNextSet }
+        set { lock.lock(); defer { lock.unlock() }; _failNextSet = newValue }
+    }
+    var setCalls: [Bool] { lock.lock(); defer { lock.unlock() }; return _setCalls }
+
+    func status() -> HelperStatus { stubStatus }
+    func install() throws {}
+    func uninstall() throws {}
+    func setSleepDisabled(_ disabled: Bool) throws {
+        lock.lock(); defer { lock.unlock() }
+        _setCalls.append(disabled)
+        if let e = _failNextSet { _failNextSet = nil; throw e }
+    }
+    func isSleepDisabled() throws -> Bool { lock.lock(); defer { lock.unlock() }; return _setCalls.last ?? false }
+}
