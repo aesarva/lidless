@@ -130,9 +130,18 @@ import os
         }
     }
 
-    /// Real behavior is added in Task 6.
     public func setLidMode(_ on: Bool) {
         settings.lidModeEnabled = on
+        guard session != nil else { return }
+        if on {
+            enableLidMode()
+        } else {
+            try? lid.disable()
+            mutateSession {
+                $0.lidModeActive = false
+                $0.lidModeSuspendedReason = nil
+            }
+        }
     }
 
     public func tick() {
@@ -146,12 +155,27 @@ import os
         }
     }
 
-    /// Active-session handling is added in Task 6.
     public func update(readings: SafetyReadings) {
         self.readings = readings
-        if session == nil {
+        guard let s = session else {
             startBlock = SafetyPolicy.canStart(readings, settings: settings.safety)
                 ? nil : .lowBattery(threshold: settings.safety.batteryThreshold)
+            return
+        }
+        switch SafetyPolicy.evaluate(readings, session: s, settings: settings.safety) {
+        case .none:
+            break
+        case .stopSession(let r):
+            attention = r
+            stop(.safety(r))
+        case .suspendLidMode(let r):
+            try? lid.disable()
+            mutateSession {
+                $0.lidModeActive = false
+                $0.lidModeSuspendedReason = r
+            }
+            attention = r
+            notifier.post(.lidModeSuspended(r))
         }
     }
 
@@ -174,10 +198,16 @@ import os
             mutateSession {
                 $0.lidModeActive = true
                 $0.lidModeEnabledAt = clock.now
+                $0.lidModeSuspendedReason = nil
             }
         } catch {
             log.error("lid enable failed: \(String(describing: error))")
-            mutateSession { $0.lidModeActive = false }
+            mutateSession {
+                $0.lidModeActive = false
+                $0.lidModeSuspendedReason = .helperUnavailable
+            }
+            attention = .helperUnavailable
+            notifier.post(.lidModeSuspended(.helperUnavailable))
         }
     }
 
