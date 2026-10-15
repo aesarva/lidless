@@ -4,7 +4,9 @@ import WakeUpCore
 /// Draws the "pulse" icon set. Geometry is ported from the 24x24 SVG symbols
 /// (p0, p1, ptimer, plid, pwarn); drawing uses a flipped (y-down) context so
 /// SVG coordinates map one-to-one.
-@MainActor
+///
+/// Deliberately nonisolated: AppKit may invoke the NSImage drawing handler on any
+/// thread, so everything the handler touches must be free of actor isolation.
 enum IconRenderer {
     static let pointSize = NSSize(width: 18, height: 18)
     private static let warnColor = NSColor(srgbRed: 1, green: 0x9F / 255, blue: 0x0A / 255, alpha: 1)
@@ -14,7 +16,7 @@ enum IconRenderer {
             let t = NSAffineTransform()
             t.scale(by: rect.width / 24)
             t.concat()
-            MainActor.assumeIsolated { draw(p) }
+            draw(p)
             return true
         }
         image.isTemplate = p.glyph != .attention

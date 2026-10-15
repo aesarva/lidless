@@ -3,6 +3,7 @@
 # $1 is the rule TEXT itself, never a path: nothing user-writable is read.
 # Exit codes: 2 visudo rejected rule, 3 sudoers lacks includedir, 4 bad user, 5 unsafe marker dir, 64 usage.
 set -euo pipefail
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 if [ "$#" -ne 3 ]; then
     echo "usage: install.sh <sudoers_rule_text> <user> <helper_dir>" >&2
@@ -38,7 +39,7 @@ if [ -e "$SHARED_DIR" ]; then
 fi
 
 umask 077
-tmp=$(mktemp)
+tmp=$(mktemp /private/tmp/wakeup.XXXXXX)
 trap 'rm -f "$tmp"' EXIT
 printf '%s' "$RULE" > "$tmp"
 

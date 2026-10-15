@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 MARKER=${WAKEUP_MARKER:-/Users/Shared/WakeUp/lid-mode.marker}
 PROC=${WAKEUP_PROCESS_NAME:-WakeUp}

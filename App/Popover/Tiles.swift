@@ -149,7 +149,9 @@ struct LidTile: View {
         } else if suspended != nil {
             controller.setLidMode(true)
         } else {
-            controller.setLidMode(!controller.settings.lidModeEnabled)
+            // Decide on what the tile shows: after a failed disable the setting is off
+            // but lid mode is still active, and a tap must retry the disable.
+            controller.setLidMode(!isOn)
         }
     }
 

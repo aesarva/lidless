@@ -20,7 +20,9 @@ struct HelperTab: View {
                     Button("Install…") {
                         run({ await helper.install() }, onSuccess: { controller.helperDidChange() })
                     }
-                    Button("Uninstall…") { run { await helper.uninstall() } }
+                    Button("Uninstall…") {
+                        run({ await helper.uninstall() }, onSuccess: { controller.setLidMode(false) })
+                    }
                     if helper.isWorking { ProgressView().controlSize(.small) }
                 }
                 .disabled(helper.isWorking)

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Usage: uninstall.sh <marker_path>   (runs as root)
 set -euo pipefail
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 MARKER=${1:?usage: uninstall.sh <marker_path>}
 

@@ -59,7 +59,12 @@ final class StatusItemController {
     @objc private func clicked() {
         if NSApp.currentEvent?.type == .rightMouseUp {
             popover.performClose(nil)
-            item.menu = QuickMenu.build(controller: controller) { [openSettings] in openSettings(.general) }
+            helper.refresh()
+            item.menu = QuickMenu.build(
+                controller: controller,
+                helperInstalled: helper.status == .installed,
+                onSettings: openSettings
+            )
             item.button?.performClick(nil)
             item.menu = nil
         } else {

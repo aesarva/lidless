@@ -37,7 +37,8 @@ A marker file, `/Users/Shared/WakeUp/lid-mode.marker`, records that WakeUp turne
 Be aware of what this does and does not protect against:
 
 - Until the app is signed with a Developer ID and the helper is registered through `SMAppService`, the helper scripts are copied from inside the app bundle at install time. That bundle is user-writable, so the install is only as trustworthy as the app you downloaded. Only install the helper from a copy of WakeUp you trust.
-- After installation, everything that runs with privileges lives in root-owned locations (the three paths above).
+- After installation, the privileged pieces that run on their own (the sudoers rule and the watchdog) live in root-owned locations (the three paths above). Uninstall is the exception: it runs `uninstall.sh` from inside the app bundle as root, through the administrator password prompt, so it is only as trustworthy as the app bundle (see the first point).
+- If the helper stops working while closed-lid mode is on (for example, the sudoers file was removed), WakeUp may be unable to turn normal sleep back on when the session ends. It then keeps retrying every 15 seconds and shows an orange dot on the menu bar icon until sleep is restored. If the watchdog is still installed, it restores sleep once WakeUp quits.
 - The sudoers rule allows exactly `pmset -a disablesleep 0|1` and no other command or argument.
 
 ### Uninstall

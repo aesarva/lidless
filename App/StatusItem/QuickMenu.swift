@@ -3,7 +3,11 @@ import WakeUpCore
 
 @MainActor
 enum QuickMenu {
-    static func build(controller: SessionController, onSettings: @escaping () -> Void = {}) -> NSMenu {
+    static func build(
+        controller: SessionController,
+        helperInstalled: Bool,
+        onSettings: @escaping (SettingsTab) -> Void = { _ in }
+    ) -> NSMenu {
         let menu = NSMenu()
         let isActive = controller.session != nil
 
@@ -23,13 +27,19 @@ enum QuickMenu {
         menu.addItem(display)
 
         let lid = ActionItem(String(localized: "Closed-Lid Mode")) {
-            controller.setLidMode(!controller.settings.lidModeEnabled)
+            let enabled = controller.settings.lidModeEnabled
+            // Without the helper, turning lid mode on would only fail: send the user to install it.
+            if !enabled && !helperInstalled {
+                onSettings(.helper)
+            } else {
+                controller.setLidMode(!enabled)
+            }
         }
         lid.state = controller.settings.lidModeEnabled ? .on : .off
         menu.addItem(lid)
         menu.addItem(.separator())
 
-        menu.addItem(ActionItem(String(localized: "Settings…"), action: onSettings))
+        menu.addItem(ActionItem(String(localized: "Settings…")) { onSettings(.general) })
         let quit = ActionItem(String(localized: "Quit WakeUp")) { NSApp.terminate(nil) }
         quit.keyEquivalent = "q"
         quit.keyEquivalentModifierMask = .command
