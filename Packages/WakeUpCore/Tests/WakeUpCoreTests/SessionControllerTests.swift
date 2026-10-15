@@ -76,8 +76,22 @@ struct SessionControllerTests {
 
     @Test func restartReplacesDuration() {
         c.start(.minutes(15))
+        clock.advance(600)
         c.restart(.minutes(180))
-        #expect(c.session?.endsAt == t0.addingTimeInterval(10800))
+        #expect(c.session?.startedAt == t0.addingTimeInterval(600))
+        #expect(c.session?.endsAt == t0.addingTimeInterval(600 + 10800))
+        #expect(c.session.map { $0.endsAt!.timeIntervalSince($0.startedAt) } == 10800)
+        #expect(assertions.acquired == [false])
+    }
+
+    @Test func startWhileActiveIsNoOp() {
+        c.settings.lidModeEnabled = true
+        #expect(c.start(.minutes(15)))
+        let before = c.session
+        clock.advance(100)
+        #expect(!c.start(.minutes(60)))
+        #expect(c.session == before)
+        #expect(lid.enableCalls == 1)
         #expect(assertions.acquired == [false])
     }
 

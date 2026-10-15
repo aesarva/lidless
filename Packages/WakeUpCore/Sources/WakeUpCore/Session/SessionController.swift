@@ -39,6 +39,7 @@ import os
 
     @discardableResult
     public func start(_ duration: SessionDuration) -> Bool {
+        guard case .off = state else { return false }
         let now = clock.now
         if let r = readings, !SafetyPolicy.canStart(r, settings: settings.safety) {
             startBlock = .lowBattery(threshold: settings.safety.batteryThreshold)
@@ -91,6 +92,7 @@ import os
         let now = clock.now
         let endsAt = duration.endDate(from: now)
         mutateSession {
+            $0.startedAt = now
             $0.endsAt = endsAt
             $0.endingSoonNotified = Self.isWithinWarning(endsAt, now: now)
         }
