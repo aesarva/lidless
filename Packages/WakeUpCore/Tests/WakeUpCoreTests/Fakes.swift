@@ -109,6 +109,23 @@ struct FakeError: Error {}
     func recoverIfNeeded() { recoverCalls += 1 }
 }
 
+@MainActor final class FakePower: PowerMonitoring {
+    var reading = PowerReading(batteryLevel: 80, onBattery: false)
+    var onChange: (() -> Void)?
+    func current() -> PowerReading { reading }
+}
+
+@MainActor final class FakeThermal: ThermalMonitoring {
+    var level: ThermalLevel = .nominal
+    var onChange: (() -> Void)?
+    func current() -> ThermalLevel { level }
+}
+
+@MainActor final class FakeLidMonitor: LidMonitoring {
+    var closed = false
+    func isLidClosed() -> Bool { closed }
+}
+
 @MainActor final class MemorySettingsStore: SettingsStore {
     var stored: WakeUpSettings
     var saveCount = 0
