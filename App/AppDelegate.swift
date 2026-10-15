@@ -35,7 +35,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onReadings: { [weak controller] readings in controller?.update(readings: readings) }
         )
 
-        statusItem = StatusItemController(controller: controller, onOpenPopover: {})
+        statusItem = StatusItemController(
+            controller: controller,
+            helper: HelperModel(backend: backend),
+            openSettings: { _ in /* Task 13 wires SettingsWindowController.show(tab:) */ }
+        )
         controller.recoverAtLaunch()
         engine.start()
         statusItem.refresh()
