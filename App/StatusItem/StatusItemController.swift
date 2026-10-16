@@ -68,6 +68,14 @@ final class StatusItemController {
         }
     }
 
+    func openPanel() {
+        if !panel.isShown { togglePopover() }
+    }
+
+    #if DEBUG
+    func capturePanel(to url: URL) { panel.capture(to: url) }
+    #endif
+
     private func togglePopover() {
         if panel.isShown {
             panel.close()

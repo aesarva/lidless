@@ -62,6 +62,14 @@ final class PanelController {
         reposition()
         NSApp.activate()
         panel.makeKeyAndOrderFront(nil)
+        // Activation of a menu-bar app is cooperative and may land a turn later; make sure
+        // the panel ends up key so nothing renders in the inactive state.
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.isShown, !self.panel.isKeyWindow else { return }
+                self.panel.makeKey()
+            }
+        }
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             MainActor.assumeIsolated { self?.close() }
         }
@@ -85,6 +93,17 @@ final class PanelController {
         }
     }
 
+    #if DEBUG
+    /// Writes the live panel (key window, real control states) to a PNG.
+    func capture(to url: URL) {
+        guard let view = panel.contentView,
+              let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: url)
+        print("captured \(url.path) key=\(panel.isKeyWindow)")
+    }
+    #endif
+
     func close() {
         guard isShown else { return }
         panel.orderOut(nil)
@@ -100,7 +119,9 @@ final class PanelController {
     private func reposition() {
         guard let button = anchor, let buttonWindow = button.window,
               let screen = buttonWindow.screen ?? NSScreen.main else { return }
-        let size = panel.contentView?.fittingSize ?? panel.frame.size
+        // Width is the panel's design width, never a transient fitting width mid-layout.
+        let fitting = panel.contentView?.fittingSize ?? panel.frame.size
+        let size = NSSize(width: Studio.panelWidth, height: fitting.height)
         let buttonFrame = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
         let visible = screen.visibleFrame
         var x = buttonFrame.midX - size.width / 2

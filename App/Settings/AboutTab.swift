@@ -13,10 +13,6 @@ struct AboutTab: View {
                 .frame(width: 96, height: 96)
             Text("Lidless").font(.system(size: 22, weight: .semibold))
             Text("Version \(version)").foregroundStyle(.secondary).monospacedDigit()
-            OnAirSign(lit: true)
-                .frame(width: 180)
-                .scaleEffect(0.8)
-                .padding(.vertical, -4)
             Link("github.com/alexsarva/lidless", destination: URL(string: "https://github.com/alexsarva/lidless")!)
         }
         .padding(.vertical, 24)

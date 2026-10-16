@@ -26,6 +26,8 @@ struct PopoverView: View {
         .frame(width: Studio.panelWidth)
         .background(Studio.panel)
         .environment(\.colorScheme, .dark)
+        // The panel is the user's focus while open; controls never take the dimmed inactive look.
+        .environment(\.controlActiveState, .key)
     }
 
     private var footer: some View {

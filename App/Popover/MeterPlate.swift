@@ -38,6 +38,7 @@ struct MeterPlate: View {
             note: note,
             lit: level.map { Int((Double($0) / 5).rounded(.up)) } ?? 0,
             liveFrom: nil,
+            onAir: controller.session != nil,
             mark: (level != nil && safety.batteryRuleEnabled) ? safety.batteryThreshold / 5 : nil
         )
         .accessibilityElement(children: .ignore)
@@ -56,7 +57,7 @@ struct MeterPlate: View {
         let note = controller.settings.safety.thermalRuleEnabled
             ? String(localized: "pauses when hot") : String(localized: "rule off")
         return MeterRow(title: String(localized: "Heat"), value: value, note: note,
-                        lit: lit, liveFrom: 14, mark: nil)
+                        lit: lit, liveFrom: 14, onAir: controller.session != nil, mark: nil)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text("Heat \(value), \(note)"))
     }
@@ -70,6 +71,8 @@ private struct MeterRow: View {
     let lit: Int
     /// Segments from this index on are the red zone.
     let liveFrom: Int?
+    /// Red is spent only while on air; off air the stop line is plate ink.
+    let onAir: Bool
     /// Segment boundary drawn as the stop line (threshold / 5).
     let mark: Int?
 
@@ -94,7 +97,7 @@ private struct MeterRow: View {
                         .frame(height: 7)
                         .overlay(alignment: .leading) {
                             if mark == i {
-                                Rectangle().fill(Studio.onAir).frame(width: 1.5).offset(x: -1.75).padding(.vertical, -3)
+                                Rectangle().fill(onAir ? Studio.onAir : Studio.plateInk).frame(width: 1.5).offset(x: -1.75).padding(.vertical, -3)
                             }
                         }
                 }

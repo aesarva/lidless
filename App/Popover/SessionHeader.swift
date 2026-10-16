@@ -38,7 +38,7 @@ struct SessionHeader: View {
     }
 
     private func headline(now: Date) -> String {
-        guard let s = controller.session else { return "0:00" }
+        guard let s = controller.session else { return "—" } // off air: no timer to show
         if let end = s.endsAt { return StatusPresentation.formatRemaining(end.timeIntervalSince(now)) }
         return StatusPresentation.formatRemaining(now.timeIntervalSince(s.startedAt))
     }

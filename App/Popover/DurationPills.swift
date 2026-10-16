@@ -49,6 +49,7 @@ struct DurationPicker: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
+        .tint(Studio.plate) // cream selection, as on the meter plate; never the system blue
         .popover(isPresented: $showUntil, arrowEdge: .bottom) { untilPicker }
     }
 

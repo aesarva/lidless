@@ -8,6 +8,8 @@ private struct SwitchRow: View {
     var detailColor: Color = Studio.inkDim
     @Binding var isOn: Bool
     var enabled = true
+    /// Red only while on air; off air an enabled setting is shown in studio ink.
+    var onAir = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -20,7 +22,7 @@ private struct SwitchRow: View {
             Toggle(title, isOn: $isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .tint(Studio.onAir)
+                .tint(onAir ? Studio.onAir : Studio.inkDim)
                 .controlSize(.small)
                 .disabled(!enabled)
         }
@@ -37,7 +39,8 @@ struct DisplayRow: View {
         SwitchRow(
             title: String(localized: "Keep display on"),
             detail: on ? String(localized: "the screen stays lit") : String(localized: "the screen may sleep"),
-            isOn: Binding(get: { on }, set: { controller.setKeepDisplayOn($0) })
+            isOn: Binding(get: { on }, set: { controller.setKeepDisplayOn($0) }),
+            onAir: controller.session != nil
         )
     }
 }
@@ -81,7 +84,8 @@ struct LidRow: View {
             detail: detail.0,
             detailColor: detail.1,
             isOn: Binding(get: { isOn && suspended == nil }, set: { _ in Task { await tap() } }),
-            enabled: !helper.isWorking
+            enabled: !helper.isWorking,
+            onAir: controller.session != nil
         )
     }
 

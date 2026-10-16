@@ -5,6 +5,8 @@ import LidlessCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var backend: SudoersBackend!
     private(set) var lid: LidSleepService!
+    /// The lid control the controller uses (the real service; a fake in debug review runs).
+    private var lidControl: LidSleepControlling!
     private(set) var controller: SessionController!
     private(set) var engine: SafetyEngine!
     private var statusItem: StatusItemController!
@@ -28,11 +30,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lid = LidSleepService(backend: backend)
         notifier = UserNotifier()
         let clock = SystemClock()
+        lidControl = lid
+        var settingsStore: SettingsStore = UserDefaultsSettingsStore()
+        #if DEBUG
+        // Design-review runs never touch the real helper, marker or the user's settings:
+        // another Lidless may be running with lid mode on.
+        if Self.flag(args["DebugStartSession"]) || args["CapturePanelTo"] != nil {
+            lidControl = PreviewLid()
+            let store = PreviewStore()
+            store.settings.lidModeEnabled = true
+            settingsStore = store
+        }
+        #endif
         let controller = SessionController(
             assertions: IOPMSleepAssertionService(),
-            lid: lid,
+            lid: lidControl,
             notifier: notifier,
-            settingsStore: UserDefaultsSettingsStore(),
+            settingsStore: settingsStore,
             clock: clock,
             display: SystemDisplayControl()
         )
@@ -61,6 +75,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         engine.start()
         controller.startOnLaunchIfEnabled()
         statusItem.refresh()
+        #if DEBUG
+        // -DebugStartSession YES -OpenPanelOnLaunch YES: live panel captures for design review.
+        if Self.flag(args["DebugStartSession"]) { controller.start(.minutes(60)) }
+        if Self.flag(args["OpenPanelOnLaunch"]) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                MainActor.assumeIsolated { self?.statusItem.openPanel() }
+            }
+            if let path = args["CapturePanelTo"] as? String {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                    MainActor.assumeIsolated {
+                        self?.statusItem.capturePanel(to: URL(fileURLWithPath: path))
+                        NSApp.terminate(nil)
+                    }
+                }
+            }
+        }
+        #endif
 
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -79,8 +110,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private static func flag(_ value: Any?) -> Bool {
+        switch value {
+        case let b as Bool: b
+        case let s as String: ["YES", "TRUE", "1"].contains(s.uppercased())
+        default: false
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         guard let controller else { return } // nil when a debug snapshot run quits early
+        // Leave the Mac exactly as macOS would have it: the session's assertions go with the
+        // process, and closed-lid mode (`pmset disablesleep`) is turned back off here.
         if case .active = controller.state { controller.stop(.appQuit) }
+        // A failed earlier reset (orange dot) gets one more try; the watchdog covers the rest.
+        _ = lidControl.recoverIfNeeded()
     }
 }
