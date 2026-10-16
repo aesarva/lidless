@@ -1,0 +1,208 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-16T12:47:08.013221+00:00",
+  "title": "Design System: Lidless",
+  "extensions": {
+    "colorMeta": {
+      "signal-red": {
+        "role": "primary",
+        "displayName": "Signal Red",
+        "canonical": "#E0342A",
+        "tonalRamp": [
+          "#3A0B08",
+          "#5E140F",
+          "#8A1D16",
+          "#B52A21",
+          "#E0342A",
+          "#EC5C52",
+          "#F5928B",
+          "#FBCBC7"
+        ]
+      },
+      "studio-black": {
+        "role": "neutral",
+        "displayName": "Studio Black",
+        "canonical": "#121212",
+        "tonalRamp": [
+          "#000000",
+          "#0A0A0A",
+          "#121212",
+          "#1C1C1C",
+          "#2A2A2A",
+          "#3D3D3D",
+          "#5A5A5A",
+          "#808080"
+        ]
+      },
+      "studio-cream": {
+        "role": "neutral",
+        "displayName": "Studio Cream",
+        "canonical": "#E8E2D6",
+        "tonalRamp": [
+          "#4A4640",
+          "#69645B",
+          "#8A857A",
+          "#ABA69A",
+          "#C8C2B6",
+          "#E8E2D6",
+          "#F0ECE3",
+          "#F8F6F1"
+        ]
+      },
+      "caution-amber": {
+        "role": "tertiary",
+        "displayName": "Caution Amber",
+        "canonical": "#F2A65A",
+        "tonalRamp": [
+          "#5A3410",
+          "#7F4A1A",
+          "#A8652A",
+          "#D28440",
+          "#F2A65A",
+          "#F6BE85",
+          "#FAD7B0",
+          "#FDEBD8"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "sign": {
+        "displayName": "Sign",
+        "purpose": "ON AIR lettering only."
+      },
+      "headline-time": {
+        "displayName": "Headline time",
+        "purpose": "Remaining or elapsed session time."
+      },
+      "row-title": {
+        "displayName": "Row title",
+        "purpose": "Switch row titles."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Segments, meters, captions under the time."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Row details and meter notes."
+      }
+    },
+    "shadows": [
+      {
+        "name": "window-system",
+        "value": "system window shadow plus 1px rgba(255,255,255,0.10) inner border",
+        "purpose": "Only depth cue on the panel; no glows."
+      }
+    ],
+    "motion": [
+      {
+        "name": "sign-strike",
+        "value": "brightness 0.55 (60ms) -> 0.25 (50ms, delay 70ms) -> 1 (120ms, delay 130ms)",
+        "purpose": "Lamp lights on session start."
+      },
+      {
+        "name": "sign-off",
+        "value": "easeOut 350ms",
+        "purpose": "Fade to dark glass."
+      },
+      {
+        "name": "reduce-motion",
+        "value": "easeOut 200ms crossfade",
+        "purpose": "Sign under Reduce Motion."
+      },
+      {
+        "name": "segment-select",
+        "value": "easeOut 150ms",
+        "purpose": "Duration segment selection."
+      },
+      {
+        "name": "meter-fill",
+        "value": "easeOut 250ms",
+        "purpose": "Meter cell changes."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "On Air Sign (lit)",
+      "kind": "custom",
+      "refersTo": "on-air-sign",
+      "description": "Lit sign while a session runs.",
+      "html": "<div class=\"ds-sign\">ON AIR</div>",
+      "css": ".ds-sign{height:56px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid #A8221A;background:linear-gradient(#EC4A3E,#E0342A);color:#fff;font:700 21px Unbounded,sans-serif;letter-spacing:3.2px;width:296px}"
+    },
+    {
+      "name": "On Air Sign (off)",
+      "kind": "custom",
+      "refersTo": "on-air-sign-off",
+      "description": "Dark glass, lettering still legible.",
+      "html": "<div class=\"ds-sign-off\">ON AIR</div>",
+      "css": ".ds-sign-off{height:56px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid rgba(0,0,0,.6);background:#2A1311;color:#6B2E28;font:700 21px Unbounded,sans-serif;letter-spacing:3.2px;width:296px}"
+    },
+    {
+      "name": "Duration Control",
+      "kind": "custom",
+      "refersTo": "duration-track",
+      "description": "Custom segment row; selected segment is cream.",
+      "html": "<div class=\"ds-seg\"><button>15 min</button><button class=\"on\">1 h</button><button>3 h</button><button>Until…</button><button>∞</button></div>",
+      "css": ".ds-seg{display:flex;gap:2px;padding:2px;background:#1C1C1C;border-radius:8px;width:296px}.ds-seg button{flex:1;min-height:26px;border:0;border-radius:6px;background:transparent;color:#E8E2D6;font:400 12px system-ui}.ds-seg button:hover{background:rgba(232,226,214,.08)}.ds-seg button.on{background:#E8E2D6;color:#1A1A1A;font-weight:600}.ds-seg button:focus-visible{outline:2px solid #E8E2D6}"
+    },
+    {
+      "name": "Meter Plate",
+      "kind": "card",
+      "refersTo": "meter-plate",
+      "description": "Cream plate with a 20-cell meter and stop line.",
+      "html": "<div class=\"ds-plate\"><div class=\"ds-mrow\"><b>Battery</b><span>stop at 20%</span><b>47%</b></div><div class=\"ds-cells\"><i class=\"l\"></i><i class=\"l\"></i><i class=\"l\"></i><i class=\"l\"></i><i></i><i></i><i></i><i></i></div></div>",
+      "css": ".ds-plate{background:#E8E2D6;color:#1A1A1A;border-radius:9px;padding:11px 12px;width:296px;font:12px system-ui}.ds-mrow{display:flex;justify-content:space-between;gap:8px;margin-bottom:5px}.ds-mrow span{font-size:11px;opacity:.62;margin-left:auto}.ds-cells{display:flex;gap:2px}.ds-cells i{flex:1;height:7px;border-radius:1px;background:rgba(26,26,26,.13)}.ds-cells i.l{background:#1A1A1A}"
+    },
+    {
+      "name": "Switch Row",
+      "kind": "custom",
+      "refersTo": "panel",
+      "description": "Title and detail with a switch; red only on air.",
+      "html": "<div class=\"ds-row\"><div><div class=\"t\">Keep display on</div><div class=\"d\">the screen may sleep</div></div><span class=\"sw\"></span></div>",
+      "css": ".ds-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;background:#121212;color:#E8E2D6;width:296px;font-family:system-ui}.ds-row .t{font-size:13px;font-weight:500}.ds-row .d{font-size:11px;color:rgba(232,226,214,.66)}.ds-row .sw{width:36px;height:20px;border-radius:10px;background:#2A2A2A}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Studio Door",
+    "overview": "The menu-bar panel is the door of a broadcast studio. While Lidless holds the Mac awake the ON AIR sign is lit; when it is not, the sign is dark glass with readable lettering. The panel is always dark studio black, with one cream plate and signal red spent only on being on air. Flat light, compact vertical column; the settings window stays native.",
+    "keyCharacteristics": [
+      "Always-dark panel, 320pt wide, 14pt continuous corners.",
+      "Signal red means on air and nothing else.",
+      "Cream plate is the only light surface; it holds measurements.",
+      "State is never calmer than reality."
+    ],
+    "rules": [
+      {
+        "name": "The Spent Red Rule",
+        "body": "Red appears only while on air (or as the standing heat red zone, shown faint when off). Off air an enabled switch is cream-grey and the battery stop line is plate ink.",
+        "section": "colors"
+      },
+      {
+        "name": "The Cream Plate Rule",
+        "body": "Measurements live on the cream plate; the plate is the only light surface in the panel.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Loud Face Rule",
+        "body": "Unbounded belongs to the sign. Everything else is SF Pro.",
+        "section": "typography"
+      }
+    ],
+    "dos": [
+      "Do keep the panel dark and 320pt wide in every system appearance.",
+      "Do spend signal red only on on-air state.",
+      "Do use tabular digits for every changing number.",
+      "Do pair every state with words; off air says so in text.",
+      "Do keep the Settings window native and system-appearance."
+    ],
+    "donts": [
+      "Don't set red on a control while off air.",
+      "Don't use Unbounded outside the sign.",
+      "Don't put coloured glows or extra light surfaces in the panel.",
+      "Don't replace the duration row with a native segmented control (it breaks the panel width).",
+      "Don't show a calm value (a timer, a full meter) when the data is absent; use an em dash and empty cells."
+    ]
+  }
+}
