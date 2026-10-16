@@ -790,6 +790,16 @@
         }
       }
     },
+    "on air the lid can close: screen goes dark, the Mac keeps running": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "в эфире крышку можно закрыть: экран погаснет, Mac продолжит работать"
+          }
+        }
+      }
+    },
     "on power": {
       "localizations": {
         "ru": {

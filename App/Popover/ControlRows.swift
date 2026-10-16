@@ -74,7 +74,12 @@ struct LidRow: View {
             case .lowBattery: return (String(localized: "paused: low battery"), Studio.caution)
             }
         }
-        if isOn { return (String(localized: "screen goes dark, the Mac keeps running"), Studio.inkDim) }
+        if isOn, controller.session != nil {
+            return (String(localized: "screen goes dark, the Mac keeps running"), Studio.inkDim)
+        }
+        if isOn {
+            return (String(localized: "on air the lid can close: screen goes dark, the Mac keeps running"), Studio.inkDim)
+        }
         return (String(localized: "closing the lid puts the Mac to sleep"), Studio.inkDim)
     }
 

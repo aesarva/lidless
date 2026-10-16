@@ -39,17 +39,18 @@ struct DurationPicker: View {
     }
 
     var body: some View {
-        Picker("Duration", selection: Binding<Choice?>(get: { current }, set: { pick($0) })) {
-            ForEach(controller.settings.presetMinutes, id: \.self) { m in
-                Text(DurationFormat.label(minutes: m)).tag(Choice?.some(.preset(m)))
+        let items: [(Choice, String)] = controller.settings.presetMinutes.map { (.preset($0), DurationFormat.label(minutes: $0)) }
+            + [(.until, String(localized: "Until…")), (.indefinite, "∞")]
+        HStack(spacing: 2) {
+            ForEach(items, id: \.0) { choice, title in
+                Segment(title: title, selected: current == choice) { pick(choice) }
+                    .accessibilityLabel(choice == .indefinite ? Text("Indefinitely") : Text(title))
             }
-            Text("Until…").tag(Choice?.some(.until))
-            Text("∞").tag(Choice?.some(.indefinite))
-                .accessibilityLabel(Text("Indefinitely"))
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .tint(Studio.plate) // cream selection, as on the meter plate; never the system blue
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Studio.raised))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Duration"))
         .popover(isPresented: $showUntil, arrowEdge: .bottom) { untilPicker }
     }
 
@@ -86,5 +87,34 @@ struct DurationPicker: View {
         } else {
             controller.restart(duration)
         }
+    }
+}
+
+/// One segment of the duration control: equal share of the width, cream when selected.
+private struct Segment: View {
+    let title: String
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .foregroundStyle(selected ? Studio.plateInk : Studio.ink)
+                .frame(maxWidth: .infinity, minHeight: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(selected ? Studio.plate : (hovering ? Studio.ink.opacity(0.08) : .clear))
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .animation(.easeOut(duration: 0.15), value: selected)
     }
 }

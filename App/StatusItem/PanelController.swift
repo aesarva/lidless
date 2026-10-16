@@ -40,7 +40,8 @@ final class PanelController {
                 .clipShape(RoundedRectangle(cornerRadius: Studio.corner, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: Studio.corner, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
-                .fixedSize()
+                // Width is the design width (children compress to it); height is natural.
+                .fixedSize(horizontal: false, vertical: true)
         ))
         host.sizingOptions = [.intrinsicContentSize]
         panel.contentView = host
