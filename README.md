@@ -12,9 +12,9 @@ Requires macOS 14 or later.
 
 ## Install
 
-1. Download `Lidless.zip` from the GitHub Releases page and unzip it.
-2. Move `Lidless.app` to `/Applications`.
-3. The app is ad-hoc signed (not notarized), so Gatekeeper will block the first launch. Either right-click the app and choose **Open**, or remove the quarantine flag:
+1. Download `Lidless.dmg` from the GitHub Releases page and open it.
+2. Drag `Lidless.app` onto the `Applications` shortcut.
+3. Until releases are signed with a Developer ID and notarized, Gatekeeper blocks the first launch. Either right-click the app and choose **Open**, or remove the quarantine flag:
 
    ```
    xattr -dr com.apple.quarantine /Applications/Lidless.app
@@ -57,8 +57,28 @@ brew install xcodegen shellcheck
 make build     # generate the Xcode project and build (Debug)
 make run       # build and launch
 make test      # Swift package tests, shellcheck, watchdog script tests
-make release   # Release build, ad-hoc signed, build/Lidless.zip
+make app       # Release universal build (arm64 + x86_64), hardened runtime → build/Lidless.app
+make dmg       # make app + dist/Lidless-<VERSION>.dmg without Developer ID (VERSION=0.1.0 by default)
 ```
+
+To try a build locally, copy `build/Lidless.app` to `/Applications` and launch it.
+
+`scripts/build-app.sh` honours `ARCHS` (e.g. `ARCHS=arm64` for Apple Silicon only), `VERSION` and `SIGN_IDENTITY` (default `-`, ad-hoc). The build number is the commit count. The app icon is an Icon Composer document, `App/Resources/AppIcon.icon`.
+
+## Release
+
+Lidless is distributed outside the App Store (its privileged helper is not allowed there) as a DMG signed with a Developer ID and notarized by Apple, so it opens with a normal double-click.
+
+One-time setup:
+
+1. Join the [Apple Developer Program](https://developer.apple.com/programs/) and create a **Developer ID Application** certificate in Xcode → Settings → Accounts → Manage Certificates.
+2. Store notarization credentials (an app-specific password from appleid.apple.com):
+
+   ```
+   xcrun notarytool store-credentials Lidless --apple-id <you@example.com> --team-id <TEAMID>
+   ```
+
+Cut a release with `scripts/release.sh 0.1.0` → `dist/Lidless-0.1.0.dmg` (build, sign, notarize the app and the DMG, staple, check Gatekeeper). The certificate is picked from the keychain automatically; with several, set `SIGN_IDENTITY="Developer ID Application: …"`. Without a certificate, `scripts/release.sh 0.1.0 --unsigned` (or `make dmg`) checks everything except signing and notarization.
 
 ## Manual verification
 
@@ -75,10 +95,12 @@ These checks need a real MacBook and are not automated. Status: pending.
 
 Lidless - приложение в строке меню macOS, которое не даёт Mac уснуть, в том числе с закрытой крышкой.
 
-**Установка.** Скачайте `Lidless.zip` из GitHub Releases, распакуйте, перенесите `Lidless.app` в «Программы». Приложение подписано ad-hoc и не нотаризовано: при первом запуске нажмите правой кнопкой -> «Открыть» или выполните `xattr -dr com.apple.quarantine /Applications/Lidless.app`.
+**Установка.** Скачайте `Lidless.dmg` из GitHub Releases, откройте и перетащите `Lidless.app` на ярлык «Applications». Пока релизы не подписаны Developer ID и не нотаризованы, при первом запуске нажмите правой кнопкой → «Открыть» или выполните `xattr -dr com.apple.quarantine /Applications/Lidless.app`.
 
 **Помощник.** Режим закрытой крышки требует прав root для `pmset -a disablesleep`. При первом включении Lidless один раз запросит пароль администратора и установит `/etc/sudoers.d/lidless` (разрешает только `pmset -a disablesleep 0|1`), сторожа `/Library/PrivilegedHelperTools/app.lidless.watchdog.sh` и launchd-задачу `/Library/LaunchDaemons/app.lidless.watchdog.plist`; маркер состояния - `/Users/Shared/Lidless/lid-mode.marker`. Если Lidless завершится аварийно, сторож вернёт обычный сон. Пока приложение не подписано Developer ID и не использует SMAppService, скрипты ставятся из пакета приложения, доступного пользователю на запись, поэтому установка настолько надёжна, насколько надёжно скачанное приложение; после установки всё выполняется из каталогов, принадлежащих root.
 
 **Удаление.** Настройки -> Помощник -> Удалить, затем удалите `Lidless.app`.
 
-**Сборка.** `make build`, `make test`, `make release`; нужны Xcode 16+ и `brew install xcodegen shellcheck`.
+**Сборка.** `make test`; `make app` собирает universal `build/Lidless.app` (hardened runtime, ad-hoc подпись) — скопируйте его в `/Applications` и запустите; `make dmg` дополнительно создаёт `dist/Lidless-<версия>.dmg`. Нужны Xcode 16+ и `brew install xcodegen shellcheck`.
+
+**Релиз.** `scripts/release.sh 0.1.0` — сборка, подпись Developer ID, нотаризация приложения и DMG, проверка Gatekeeper (однократная подготовка — раздел «Release» выше). Без сертификата: `scripts/release.sh 0.1.0 --unsigned`.

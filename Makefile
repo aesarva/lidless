@@ -3,7 +3,7 @@ export DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
 .PHONY: test
 test:
 	cd Packages/LidlessCore && swift test
-	shellcheck Helper/*.sh Helper/tests/*.sh
+	shellcheck scripts/*.sh Helper/*.sh Helper/tests/*.sh
 	bash Helper/tests/watchdog_test.sh
 	plutil -lint Helper/app.lidless.watchdog.plist
 
@@ -17,8 +17,13 @@ build: generate
 run: build
 	open build/Build/Products/Debug/Lidless.app
 
-.PHONY: release
-release: generate
-	xcodebuild -project Lidless.xcodeproj -scheme Lidless -configuration Release -derivedDataPath build build
-	codesign --force --deep -s - build/Build/Products/Release/Lidless.app
-	ditto -c -k --keepParent build/Build/Products/Release/Lidless.app build/Lidless.zip
+.PHONY: app dmg
+# Release universal build → build/Lidless.app (ad-hoc unless SIGN_IDENTITY is set).
+app:
+	scripts/build-app.sh
+
+# DMG without Developer ID: make dmg VERSION=0.1.0 → dist/Lidless-0.1.0.dmg.
+# Signed + notarized release: scripts/release.sh <version>.
+VERSION ?= 0.1.0
+dmg:
+	scripts/release.sh $(VERSION) --unsigned
