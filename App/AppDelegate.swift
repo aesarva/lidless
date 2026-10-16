@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var tickTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        StudioFont.register()
         #if DEBUG
         // Debug args come only from the command line (argument domain), never from persisted defaults.
         let args = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)

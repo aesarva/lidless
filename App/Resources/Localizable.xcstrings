@@ -1,12 +1,15 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "%@ left · until %@": {
+    "": {
+      "shouldTranslate": false
+    },
+    " · lid can close": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "ещё %@ · до %@"
+            "value": " · можно закрыть крышку"
           }
         }
       }
@@ -91,12 +94,22 @@
         }
       }
     },
-    "Awake": {
+    "Battery": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Не сплю"
+            "value": "Батарея"
+          }
+        }
+      }
+    },
+    "Battery %@, %@": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Батарея %1$@, %2$@"
           }
         }
       }
@@ -117,6 +130,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Закрытая крышка"
+          }
+        }
+      }
+    },
+    "Closed-lid mode": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Режим крышки"
           }
         }
       }
@@ -171,16 +194,6 @@
         }
       }
     },
-    "Could not install the helper": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Не удалось установить помощника"
-          }
-        }
-      }
-    },
     "Couldn't keep Mac awake: %@": {
       "localizations": {
         "ru": {
@@ -197,16 +210,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Длительность по умолчанию"
-          }
-        }
-      }
-    },
-    "Display": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Экран"
           }
         }
       }
@@ -237,6 +240,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "Основные"
+          }
+        }
+      }
+    },
+    "Go off air": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Уйти из эфира"
+          }
+        }
+      }
+    },
+    "Go on air": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выйти в эфир"
+          }
+        }
+      }
+    },
+    "Heat": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нагрев"
+          }
+        }
+      }
+    },
+    "Heat %@, %@": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нагрев %1$@, %2$@"
           }
         }
       }
@@ -291,6 +334,26 @@
         }
       }
     },
+    "Keep awake": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не спать"
+          }
+        }
+      }
+    },
+    "Keep display on": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Экран не гаснет"
+          }
+        }
+      }
+    },
     "Launch at login": {
       "localizations": {
         "ru": {
@@ -301,12 +364,35 @@
         }
       }
     },
-    "Lid": {
+    "Lidless": {
+      "shouldTranslate": false
+    },
+    "Lidless Settings": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Крышка"
+            "value": "Настройки Lidless"
+          }
+        }
+      }
+    },
+    "Lidless ends in 5 minutes": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lidless выключится через 5 минут"
+          }
+        }
+      }
+    },
+    "Lidless session ended": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сессия Lidless завершена"
           }
         }
       }
@@ -341,22 +427,42 @@
         }
       }
     },
-    "OK": {
+    "ON AIR": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "OK"
+            "value": "В ЭФИРЕ"
           }
         }
       }
     },
-    "Off": {
+    "Off air": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Выключено"
+            "value": "Не в эфире"
+          }
+        }
+      }
+    },
+    "Off air · the Mac sleeps as usual": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не в эфире · Mac засыпает как обычно"
+          }
+        }
+      }
+    },
+    "On air: Lidless keeps the Mac awake": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "В эфире: Lidless не даёт Mac уснуть"
           }
         }
       }
@@ -367,16 +473,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Пресеты"
-          }
-        }
-      }
-    },
-    "Quit": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Выйти"
           }
         }
       }
@@ -407,6 +503,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Безопасность"
+          }
+        }
+      }
+    },
+    "Safety settings": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Настройки защиты"
           }
         }
       }
@@ -471,6 +577,16 @@
         }
       }
     },
+    "Stay awake until": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не спать до"
+          }
+        }
+      }
+    },
     "Stopped: Mac is overheating with the lid closed": {
       "localizations": {
         "ru": {
@@ -487,16 +603,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Остановлено: заряд ниже %lld%%"
-          }
-        }
-      }
-    },
-    "Thermal": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Нагрев"
           }
         }
       }
@@ -581,32 +687,12 @@
         }
       }
     },
-    "Lidless Settings": {
+    "closing the lid puts the Mac to sleep": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Настройки Lidless"
-          }
-        }
-      }
-    },
-    "Lidless ends in 5 minutes": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Lidless выключится через 5 минут"
-          }
-        }
-      }
-    },
-    "Lidless session ended": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Сессия Lidless завершена"
+            "value": "закрытая крышка усыпит Mac"
           }
         }
       }
@@ -621,6 +707,19 @@
         }
       }
     },
+    "github.com/alexsarva/lidless": {
+      "shouldTranslate": false
+    },
+    "helper install failed: %@": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "помощник не установлен: %@"
+          }
+        }
+      }
+    },
     "high": {
       "localizations": {
         "ru": {
@@ -631,32 +730,42 @@
         }
       }
     },
-    "keeps awake": {
+    "installing the helper…": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "не усыпляет"
+            "value": "устанавливаю помощника…"
           }
         }
       }
     },
-    "may sleep": {
+    "left · until %@": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "может гаснуть"
+            "value": "осталось · до %@"
           }
         }
       }
     },
-    "needs helper": {
+    "needs a one-time helper install": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "нужен помощник"
+            "value": "нужно один раз установить помощника"
+          }
+        }
+      }
+    },
+    "no battery": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "нет батареи"
           }
         }
       }
@@ -671,12 +780,22 @@
         }
       }
     },
-    "off": {
+    "on air since %@": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "выключено"
+            "value": "в эфире с %@"
+          }
+        }
+      }
+    },
+    "on power": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "от сети"
           }
         }
       }
@@ -701,12 +820,32 @@
         }
       }
     },
-    "paused: overheating": {
+    "paused: low battery": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "пауза: перегрев"
+            "value": "пауза: низкий заряд"
+          }
+        }
+      }
+    },
+    "paused: the Mac is hot": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "пауза: Mac нагрелся"
+          }
+        }
+      }
+    },
+    "pauses when hot": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "пауза при нагреве"
           }
         }
       }
@@ -721,12 +860,12 @@
         }
       }
     },
-    "stays on": {
+    "screen goes dark, the Mac keeps running": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "не гаснет"
+            "value": "экран погаснет, Mac продолжит работать"
           }
         }
       }
@@ -740,6 +879,29 @@
           }
         }
       }
+    },
+    "the screen may sleep": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "экран может гаснуть"
+          }
+        }
+      }
+    },
+    "the screen stays lit": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "экран горит"
+          }
+        }
+      }
+    },
+    "∞": {
+      "shouldTranslate": false
     }
   },
   "version": "1.0"

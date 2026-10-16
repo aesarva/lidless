@@ -30,6 +30,7 @@ struct SettingsView: View {
                 .tag(SettingsTab.about)
         }
         .padding(20)
-        .frame(width: 480, height: 400)
+        .frame(width: 500)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }

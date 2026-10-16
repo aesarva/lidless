@@ -1,14 +1,14 @@
 {
   "fill" : {
-    "solid" : "srgb:0.11400,0.14100,0.25100,1.00000"
+    "solid" : "srgb:0.07100,0.07100,0.07100,1.00000"
   },
   "groups" : [
     {
       "layers" : [
         {
           "glass" : false,
-          "image-name" : "pulse.png",
-          "name" : "pulse"
+          "image-name" : "onair.png",
+          "name" : "onair"
         }
       ],
       "shadow" : {

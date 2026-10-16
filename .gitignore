@@ -7,3 +7,6 @@ DerivedData/
 .swiftpm/
 .claude/
 dist/
+.impeccable/mocks/
+.impeccable/review/
+.impeccable/build/

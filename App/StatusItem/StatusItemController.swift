@@ -6,7 +6,7 @@ import LidlessCore
 final class StatusItemController {
     private let controller: SessionController
     private let helper: HelperModel
-    private let popover = NSPopover()
+    private let panel: PanelController
     private let item: NSStatusItem
     private var lastPresentation: StatusPresentation?
     private let openSettings: (SettingsTab) -> Void
@@ -15,22 +15,18 @@ final class StatusItemController {
         self.controller = controller
         self.helper = helper
         self.openSettings = openSettings
-        let popover = self.popover
-        let host = NSHostingController(
-            rootView: PopoverView(controller: controller, helper: helper) { tab in
-                popover.performClose(nil)
-                openSettings(tab)
-            }
-        )
-        host.sizingOptions = .preferredContentSize
-        popover.behavior = .transient
-        popover.contentViewController = host
+        var closePanel: () -> Void = {}
+        panel = PanelController(content: PopoverView(controller: controller, helper: helper) { tab in
+            closePanel()
+            openSettings(tab)
+        })
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
             button.target = self
             button.action = #selector(clicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
+        closePanel = { [panel] in panel.close() }
         refresh()
     }
 
@@ -58,7 +54,7 @@ final class StatusItemController {
 
     @objc private func clicked() {
         if NSApp.currentEvent?.type == .rightMouseUp {
-            popover.performClose(nil)
+            panel.close()
             helper.refresh()
             item.menu = QuickMenu.build(
                 controller: controller,
@@ -73,15 +69,14 @@ final class StatusItemController {
     }
 
     private func togglePopover() {
-        if popover.isShown {
-            popover.performClose(nil)
+        if panel.isShown {
+            panel.close()
             return
         }
         guard let button = item.button else { return }
         controller.clearAttention()
         helper.refresh()
         refresh()
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        NSApp.activate(ignoringOtherApps: true)
+        panel.show(below: button)
     }
 }

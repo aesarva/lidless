@@ -7,14 +7,19 @@ struct AboutTab: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
                 .frame(width: 96, height: 96)
-            Text("Lidless").font(.title)
-            Text("Version \(version)").foregroundStyle(.secondary)
+            Text("Lidless").font(.system(size: 22, weight: .semibold))
+            Text("Version \(version)").foregroundStyle(.secondary).monospacedDigit()
+            OnAirSign(lit: true)
+                .frame(width: 180)
+                .scaleEffect(0.8)
+                .padding(.vertical, -4)
             Link("github.com/alexsarva/lidless", destination: URL(string: "https://github.com/alexsarva/lidless")!)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.vertical, 24)
+        .frame(maxWidth: .infinity)
     }
 }

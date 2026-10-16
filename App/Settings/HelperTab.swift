@@ -37,6 +37,8 @@ struct HelperTab: View {
             }
         }
         .formStyle(.grouped)
+        .scrollDisabled(true)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func run(_ work: @escaping () async -> HelperError?, onSuccess: @escaping () -> Void = {}) {

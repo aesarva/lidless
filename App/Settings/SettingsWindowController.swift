@@ -21,14 +21,12 @@ final class SettingsWindowController {
         loginItem.refresh()
         if window == nil {
             let view = SettingsView(controller: controller, helper: helper, loginItem: loginItem, navigation: navigation)
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 480, height: 400),
-                styleMask: [.titled, .closable],
-                backing: .buffered,
-                defer: false
-            )
+            let host = NSHostingController(rootView: view)
+            // The window follows each tab's natural height, so no tab is ever clipped.
+            host.sizingOptions = [.preferredContentSize]
+            let window = NSWindow(contentViewController: host)
+            window.styleMask = [.titled, .closable]
             window.title = String(localized: "Lidless Settings")
-            window.contentView = NSHostingView(rootView: view)
             window.isReleasedWhenClosed = false
             window.center()
             self.window = window

@@ -55,6 +55,8 @@ struct GeneralTab: View {
             Toggle("Start a session when Lidless launches", isOn: $controller.settings.startSessionOnLaunch)
         }
         .formStyle(.grouped)
+        .scrollDisabled(true)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func addPreset(_ minutes: Int) {
