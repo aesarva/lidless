@@ -10,8 +10,9 @@ struct PopoverView: View {
     let openSettings: (SettingsTab) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            OnAirSign(lit: controller.session != nil, since: controller.session?.startedAt) {
+        VStack(alignment: .leading, spacing: 12) {
+            OnAirSign(lit: controller.session != nil, since: controller.session?.startedAt,
+                      until: controller.session?.endsAt) {
                 withAnimation(.easeInOut(duration: 0.2)) { controller.toggle() }
             }
             SessionHeader(controller: controller)

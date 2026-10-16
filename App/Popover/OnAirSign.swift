@@ -6,13 +6,15 @@ import LidlessCore
 /// visible when off. Going on air strikes the lamp in two steps, like a studio lamp warming.
 struct OnAirSign: View {
     let lit: Bool
-    /// When the running session started; the lit sign counts time on air from it.
+    /// When the running session started; an indefinite session counts time on air from it.
     var since: Date?
+    /// When a timed session ends; the sign then counts down to it instead.
+    var until: Date?
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            SignFace(lit: lit, since: since)
+            SignFace(lit: lit, since: since, until: until)
         }
         .buttonStyle(SignButtonStyle())
         .keyboardShortcut(.return, modifiers: [])
@@ -47,6 +49,7 @@ private struct SignButtonStyle: ButtonStyle {
 private struct SignFace: View {
     let lit: Bool
     let since: Date?
+    let until: Date?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var brightness: Double = 0
 
@@ -67,9 +70,10 @@ private struct SignFace: View {
                         .fill(Color.white.opacity(0.45))
                         .frame(width: 1, height: 26)
                         .transition(.opacity)
-                    // Studio on-air clock: time since this session went on air.
+                    // Studio on-air clock: a countdown when the session has an end,
+                    // otherwise time since it went on air.
                     TimelineView(.periodic(from: since, by: 1)) { context in
-                        Text(StatusPresentation.formatElapsed(context.date.timeIntervalSince(since)))
+                        Text(clock(now: context.date, since: since))
                             .font(.system(size: 21, weight: .semibold))
                             .monospacedDigit()
                             .foregroundStyle(.white)
@@ -77,7 +81,7 @@ private struct SignFace: View {
                             .lineLimit(1)
                     }
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
-                    .accessibilityLabel(Text("Time on air"))
+                    .accessibilityLabel(until == nil ? Text("Time on air") : Text("Time left"))
                 }
             }
             .padding(.horizontal, 12)
@@ -86,6 +90,14 @@ private struct SignFace: View {
         .frame(height: 56)
         .onAppear { brightness = lit ? 1 : 0 }
         .onChange(of: lit) { _, isLit in strike(isLit) }
+    }
+
+    private func clock(now: Date, since: Date) -> String {
+        if let until {
+            // Round up: the last second reads 0:01, and 0:00 only when the session ends.
+            return StatusPresentation.formatElapsed(until.timeIntervalSince(now).rounded(.up))
+        }
+        return StatusPresentation.formatElapsed(now.timeIntervalSince(since))
     }
 
     private var lettering: some View {

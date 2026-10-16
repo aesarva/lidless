@@ -637,6 +637,16 @@
         }
       }
     },
+    "Time left": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Осталось времени"
+          }
+        }
+      }
+    },
     "Time on air": {
       "localizations": {
         "ru": {
@@ -776,16 +786,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "устанавливаю помощника…"
-          }
-        }
-      }
-    },
-    "left · until %@": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "осталось · до %@"
           }
         }
       }
@@ -946,6 +946,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "экран горит"
+          }
+        }
+      }
+    },
+    "until %@": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "до %@"
           }
         }
       }
