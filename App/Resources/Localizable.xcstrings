@@ -354,6 +354,16 @@
         }
       }
     },
+    "Language": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Язык"
+          }
+        }
+      }
+    },
     "Launch at login": {
       "localizations": {
         "ru": {
@@ -383,6 +393,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Lidless выключится через 5 минут"
+          }
+        }
+      }
+    },
+    "Lidless restarts to switch the language; a running session ends.": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lidless перезапустится, чтобы сменить язык; текущая сессия завершится."
           }
         }
       }
@@ -497,6 +517,16 @@
         }
       }
     },
+    "Restart Lidless": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Перезапустить Lidless"
+          }
+        }
+      }
+    },
     "Safety": {
       "localizations": {
         "ru": {
@@ -513,6 +543,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Настройки защиты"
+          }
+        }
+      }
+    },
+    "Same as system": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Как в системе"
           }
         }
       }

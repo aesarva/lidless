@@ -5,6 +5,7 @@ struct GeneralTab: View {
     @Bindable var controller: SessionController
     let loginItem: LoginItem
     @State private var newPreset = 30
+    @State private var language = LanguageModel()
 
     /// 0 = indefinitely; otherwise preset minutes.
     private var defaultSelection: Binding<Int> {
@@ -18,6 +19,21 @@ struct GeneralTab: View {
 
     var body: some View {
         Form {
+            Section {
+                Picker("Language", selection: $language.selection) {
+                    ForEach(AppLanguage.allCases) { Text($0.title).tag($0) }
+                }
+                if language.needsRestart {
+                    HStack {
+                        Text("Lidless restarts to switch the language; a running session ends.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Restart Lidless") { language.restart() }
+                    }
+                }
+            }
+
             Toggle("Launch at login", isOn: Binding(get: { loginItem.isEnabled }, set: { loginItem.isEnabled = $0 }))
 
             Picker("Default duration", selection: defaultSelection) {
