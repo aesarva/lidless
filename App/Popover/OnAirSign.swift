@@ -1,8 +1,47 @@
 import SwiftUI
 
-/// The studio door sign. Lit red while a session runs; dark glass with its lettering still
-/// visible when off. Turning on strikes the lamp in two steps, like a studio lamp warming.
+/// The studio door sign, and the panel's main control: press it to go on air, press it
+/// again to go off air. Lit red while a session runs; dark glass with its lettering still
+/// visible when off. Going on air strikes the lamp in two steps, like a studio lamp warming.
 struct OnAirSign: View {
+    let lit: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            SignFace(lit: lit)
+        }
+        .buttonStyle(SignButtonStyle())
+        .keyboardShortcut(.return, modifiers: [])
+        .help(lit ? String(localized: "Go off air") : String(localized: "Go on air"))
+        .accessibilityLabel(lit ? Text("Go off air") : Text("Go on air"))
+        .accessibilityValue(lit ? Text("On air: Lidless keeps the Mac awake") : Text("Off air"))
+    }
+}
+
+/// Hover lifts the light a little, a press sinks the sign: it reads as something to press.
+private struct SignButtonStyle: ButtonStyle {
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(configuration.isPressed ? 0 : (hovering ? 0.07 : 0)))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.black.opacity(configuration.isPressed ? 0.18 : 0))
+            )
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.15), value: hovering)
+            .onHover { hovering = $0 }
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct SignFace: View {
     let lit: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var brightness: Double = 0
@@ -33,8 +72,6 @@ struct OnAirSign: View {
                 .padding(.horizontal, 12)
         }
         .frame(height: 56)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(lit ? Text("On air: Lidless keeps the Mac awake") : Text("Off air"))
         .onAppear { brightness = lit ? 1 : 0 }
         .onChange(of: lit) { _, isLit in strike(isLit) }
     }

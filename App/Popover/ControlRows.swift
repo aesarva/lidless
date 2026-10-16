@@ -81,7 +81,7 @@ struct LidRow: View {
             return (String(localized: "screen goes dark, the Mac keeps running"), Studio.inkDim)
         }
         if isOn {
-            return (String(localized: "on air the lid can close: screen goes dark, the Mac keeps running"), Studio.inkDim)
+            return (String(localized: "on air: screen goes dark, the Mac keeps running"), Studio.inkDim)
         }
         return (String(localized: "closing the lid puts the Mac to sleep"), Studio.inkDim)
     }

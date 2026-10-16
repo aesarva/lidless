@@ -147,7 +147,7 @@ A black studio, one cream plate, and a single spent-on-purpose signal red.
 
 ## Layout
 
-Single column, 16pt panel padding, 14pt between blocks, fixed 320pt width with natural height; the top edge stays under the menu bar when content wraps. Switch rows sit 9pt vertical padding apart with a 1px hairline between. Duration segments share width equally with a 2pt gap; meters are 20 cells with 2pt gaps, 7pt tall. Footer icon buttons (28x24 hit area) sit at the bottom corners, pulled 4pt up. English and Russian copy must wrap inside the column, never widen it.
+Single column, 16pt panel padding, 14pt between blocks, fixed 320pt width with natural height; the top edge stays under the menu bar when content wraps. Captions under the time and switch-row details have fixed two-line slots, so no state change resizes the panel. Switch rows sit 9pt vertical padding apart with a 1px hairline between. Duration segments share width equally with a 2pt gap; meters are 20 cells with 2pt gaps, 7pt tall. Footer icon buttons (28x24 hit area) sit at the bottom corners, pulled 4pt up. English and Russian copy must wrap inside the column, never widen it.
 
 ## Elevation & Depth
 
@@ -171,8 +171,8 @@ Cream plate with battery and heat rows: title, note, value, then 20 cells. Batte
 ### Switch Rows
 Title (13pt medium), 11pt detail, small native switch right. Tint is signal red only while on air, otherwise dim cream. Detail turns amber for paused or blocked states.
 
-### Session Switch
-Large native switch beside the time, tinted signal red.
+### The Sign Is the Control
+There is no session switch. The ON AIR sign is a full-width button: press it (or Return) to go on air, press it again to go off air. Hover lifts the light by 7% white, a press sinks it (scale 0.985, 18% black). Off air the caption under the time says to press the sign. A blocked start (low battery) leaves the sign dark and explains in amber.
 
 ### Menu-bar Glyphs and App Icon
 Template "pulse" glyphs at 18pt (flat line, ECG pulse, pulse in progress ring, pulse over horizon, pulse with orange attention dot, the only coloured glyph). App icon: studio-black ground with a lit red light box carrying a warm-white pulse line and a thin cream rule (generated raster, provenance in docs/asset-provenance.md).

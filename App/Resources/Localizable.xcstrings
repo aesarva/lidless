@@ -334,16 +334,6 @@
         }
       }
     },
-    "Keep awake": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Не спать"
-          }
-        }
-      }
-    },
     "Keep display on": {
       "localizations": {
         "ru": {
@@ -467,16 +457,6 @@
         }
       }
     },
-    "Off air · the Mac sleeps as usual": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Не в эфире · Mac засыпает как обычно"
-          }
-        }
-      }
-    },
     "On air: Lidless keeps the Mac awake": {
       "localizations": {
         "ru": {
@@ -493,6 +473,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Пресеты"
+          }
+        }
+      }
+    },
+    "Press the sign to go on air": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нажми на табличку, чтобы выйти в эфир"
           }
         }
       }
@@ -830,12 +820,12 @@
         }
       }
     },
-    "on air the lid can close: screen goes dark, the Mac keeps running": {
+    "on air: screen goes dark, the Mac keeps running": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "в эфире крышку можно закрыть: экран погаснет, Mac продолжит работать"
+            "value": "в эфире: экран погаснет, Mac продолжит работать"
           }
         }
       }

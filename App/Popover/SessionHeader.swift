@@ -1,7 +1,8 @@
 import SwiftUI
 import LidlessCore
 
-/// Remaining (or elapsed) time at headline scale, what it means underneath, and the session switch.
+/// Remaining (or elapsed) time at headline scale and what it means underneath. The session
+/// itself is switched by pressing the ON AIR sign above.
 struct SessionHeader: View {
     let controller: SessionController
 
@@ -28,16 +29,6 @@ struct SessionHeader: View {
                 }
             }
             Spacer(minLength: 0)
-            Toggle(isOn: Binding(get: { controller.session != nil }, set: { _ in
-                withAnimation(.easeInOut(duration: 0.2)) { controller.toggle() }
-            })) {
-                Text("Keep awake")
-            }
-            .labelsHidden()
-            .toggleStyle(.switch)
-            .tint(Studio.onAir)
-            .controlSize(.large)
-            .help(controller.session == nil ? String(localized: "Go on air") : String(localized: "Go off air"))
         }
     }
 
@@ -52,7 +43,7 @@ struct SessionHeader: View {
             if case .lowBattery(let threshold)? = controller.startBlock {
                 return String(localized: "Battery below \(threshold)% — connect power or change the limit")
             }
-            return String(localized: "Off air · the Mac sleeps as usual")
+            return String(localized: "Press the sign to go on air")
         }
         let lid = s.lidModeActive ? String(localized: " · lid can close") : ""
         guard let end = s.endsAt else {
