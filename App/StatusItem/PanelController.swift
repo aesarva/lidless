@@ -18,6 +18,10 @@ final class PanelController {
     private var keyMonitor: Any?
     private var resignObserver: NSObjectProtocol?
     var onClose: (() -> Void)?
+    /// When the panel last closed. A click on the status item first takes key away from the
+    /// panel (closing it) and only then fires the button: that click means "close", not "reopen".
+    private var closedAt = Date.distantPast
+    var closedJustNow: Bool { Date().timeIntervalSince(closedAt) < 0.4 }
 
     var isShown: Bool { panel.isVisible }
 
@@ -107,6 +111,7 @@ final class PanelController {
 
     func close() {
         guard isShown else { return }
+        closedAt = Date()
         panel.orderOut(nil)
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }

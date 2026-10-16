@@ -81,7 +81,8 @@ final class StatusItemController {
             panel.close()
             return
         }
-        guard let button = item.button else { return }
+        // The same click already closed the panel by taking key from it: leave it closed.
+        guard !panel.closedJustNow, let button = item.button else { return }
         controller.clearAttention()
         helper.refresh()
         refresh()
