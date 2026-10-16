@@ -172,7 +172,7 @@ Cream plate with battery and heat rows: title, note, value, then 20 cells. Batte
 Title (13pt medium), 11pt detail, small native switch right. Tint is signal red only while on air, otherwise dim cream. Detail turns amber for paused or blocked states.
 
 ### The Sign Is the Control
-There is no session switch. The ON AIR sign is a full-width button: press it (or Return) to go on air, press it again to go off air. Hover lifts the light by 7% white, a press sinks it (scale 0.985, 18% black). Off air the caption under the time says to press the sign. A blocked start (low battery) leaves the sign dark and explains in amber.
+There is no session switch. The ON AIR sign is a full-width button: press it (or Return) to go on air, press it again to go off air. Hover lifts the light by 7% white, a press sinks it (scale 0.985, 18% black). Off air the caption under the time says to press the sign. A blocked start (low battery) leaves the sign dark and explains in amber. While lit, the sign carries a studio on-air clock to the right of the lettering after a thin white rule: time since the session went on air, "M:SS" then "H:MM:SS", SF Pro semibold 21pt tabular; the lettering steps down to 19pt to make room. An indefinite session shows "∞" as the headline, since the clock already counts on the sign.
 
 ### Menu-bar Glyphs and App Icon
 Template "pulse" glyphs at 18pt (flat line, ECG pulse, pulse in progress ring, pulse over horizon, pulse with orange attention dot, the only coloured glyph). App icon: studio-black ground with a lit red light box carrying a warm-white pulse line and a thin cream rule (generated raster, provenance in docs/asset-provenance.md).

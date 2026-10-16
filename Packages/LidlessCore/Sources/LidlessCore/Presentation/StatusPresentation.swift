@@ -52,6 +52,14 @@ public struct StatusPresentation: Equatable, Sendable {
     }
 
     /// Округление вверх до минут, "H:MM"; только цифры и ':' (не зависит от локали).
+    /// Time on air, counted up like a studio clock: "M:SS" under an hour, "H:MM:SS" after.
+    /// Floors to whole seconds; negative or non-finite input reads as zero.
+    public static func formatElapsed(_ seconds: TimeInterval) -> String {
+        let total = seconds.isFinite ? max(0, Int(seconds.rounded(.down))) : 0
+        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+    }
+
     public static func formatRemaining(_ seconds: TimeInterval) -> String {
         let minutes = max(0, Int((seconds / 60).rounded(.up)))
         let mm = minutes % 60

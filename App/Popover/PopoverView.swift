@@ -11,7 +11,7 @@ struct PopoverView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            OnAirSign(lit: controller.session != nil) {
+            OnAirSign(lit: controller.session != nil, since: controller.session?.startedAt) {
                 withAnimation(.easeInOut(duration: 0.2)) { controller.toggle() }
             }
             SessionHeader(controller: controller)

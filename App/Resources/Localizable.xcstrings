@@ -637,6 +637,16 @@
         }
       }
     },
+    "Time on air": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Время в эфире"
+          }
+        }
+      }
+    },
     "Triggers when macOS reports serious or critical thermal pressure.": {
       "localizations": {
         "ru": {

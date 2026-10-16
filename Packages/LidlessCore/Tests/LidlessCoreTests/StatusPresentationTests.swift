@@ -14,6 +14,17 @@ struct StatusPresentationTests {
         #expect(StatusPresentation.formatRemaining(-5) == "0:00")
     }
 
+    @Test func formatElapsed() {
+        #expect(StatusPresentation.formatElapsed(0) == "0:00")
+        #expect(StatusPresentation.formatElapsed(59.9) == "0:59")
+        #expect(StatusPresentation.formatElapsed(754) == "12:34")
+        #expect(StatusPresentation.formatElapsed(3599) == "59:59")
+        #expect(StatusPresentation.formatElapsed(3600) == "1:00:00")
+        #expect(StatusPresentation.formatElapsed(4354) == "1:12:34")
+        #expect(StatusPresentation.formatElapsed(-3) == "0:00")
+        #expect(StatusPresentation.formatElapsed(.infinity) == "0:00")
+    }
+
     private func glyph(_ state: SessionState, attention: SafetyReason? = nil) -> IconGlyph {
         StatusPresentation.make(state: state, attention: attention, showTimerText: false, now: t0).glyph
     }
