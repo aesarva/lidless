@@ -13,6 +13,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var tickTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        // Debug args come only from the command line (argument domain), never from persisted defaults.
+        let args = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        if let dir = args["SnapshotDir"] as? String {
+            SnapshotExporter.export(to: dir)
+            NSApp.terminate(nil)
+            return
+        }
+        #endif
         let helperDir = Bundle.main.resourceURL!.appending(path: "Helper")
         backend = SudoersBackend(runner: ProcessCommandRunner(), helperDirectory: helperDir, userName: NSUserName())
         lid = LidSleepService(backend: backend)
@@ -23,7 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             lid: lid,
             notifier: notifier,
             settingsStore: UserDefaultsSettingsStore(),
-            clock: clock
+            clock: clock,
+            display: SystemDisplayControl()
         )
         self.controller = controller
         notifier.safetySettings = { [weak controller] in controller?.settings.safety ?? SafetySettings() }
@@ -69,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        guard let controller else { return } // nil when a debug snapshot run quits early
         if case .active = controller.state { controller.stop(.appQuit) }
     }
 }

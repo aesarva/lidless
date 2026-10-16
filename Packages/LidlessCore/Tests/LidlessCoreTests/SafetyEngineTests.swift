@@ -66,8 +66,11 @@ struct SafetyEngineTests {
         #expect(received.all.count == before + 1)
         thermal.onChange?()
         #expect(received.all.count == before + 2)
+        lid.onChange?()
+        #expect(received.all.count == before + 3)
         e.stop()
         #expect(power.onChange == nil)
         #expect(thermal.onChange == nil)
+        #expect(lid.onChange == nil)
     }
 }

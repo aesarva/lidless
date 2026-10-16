@@ -26,3 +26,18 @@ public enum WakeNotification: Equatable, Sendable {
 public enum StartBlock: Equatable, Sendable {
     case lowBattery(threshold: Int)
 }
+
+/// Screen control used when the lid closes in closed-lid mode.
+@MainActor public protocol DisplayControlling: AnyObject {
+    /// True when a display other than the built-in one is active (clamshell with a monitor).
+    func hasExternalDisplay() -> Bool
+    /// Turns the displays off now; the system keeps running.
+    func sleepDisplayNow()
+}
+
+/// Does nothing; for contexts without a real display (previews, tests that do not care).
+@MainActor public final class NoDisplayControl: DisplayControlling {
+    public init() {}
+    public func hasExternalDisplay() -> Bool { false }
+    public func sleepDisplayNow() {}
+}

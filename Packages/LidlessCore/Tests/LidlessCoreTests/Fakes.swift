@@ -127,6 +127,7 @@ struct FakeError: Error {}
 
 @MainActor final class FakeLidMonitor: LidMonitoring {
     var closed = false
+    var onChange: (() -> Void)?
     func isLidClosed() -> Bool { closed }
 }
 
@@ -136,4 +137,11 @@ struct FakeError: Error {}
     init(_ initial: LidlessSettings = LidlessSettings()) { stored = initial }
     func load() -> LidlessSettings { stored }
     func save(_ s: LidlessSettings) { stored = s; saveCount += 1 }
+}
+
+@MainActor final class FakeDisplay: DisplayControlling {
+    var external = false
+    var sleepCalls = 0
+    func hasExternalDisplay() -> Bool { external }
+    func sleepDisplayNow() { sleepCalls += 1 }
 }

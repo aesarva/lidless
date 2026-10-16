@@ -23,11 +23,16 @@ struct SystemAdapterTests {
         defer { service.release() }
         let runner = ProcessCommandRunner()
         try service.acquire(keepDisplayOn: true)
+        // Only this test process's assertions count: a running Lidless app holds its own.
+        let mine = "pid \(ProcessInfo.processInfo.processIdentifier)("
+        func ours(_ out: String) -> Bool {
+            out.split(separator: "\n").contains { $0.contains(mine) && $0.contains("Lidless session") }
+        }
         let during = try runner.run("/usr/bin/pmset", ["-g", "assertions"])
-        #expect(during.stdout.contains("Lidless session"))
+        #expect(ours(during.stdout))
         service.release()
         let after = try runner.run("/usr/bin/pmset", ["-g", "assertions"])
-        #expect(!after.stdout.contains("Lidless session"))
+        #expect(!ours(after.stdout))
     }
 
     @Test func powerReadingIsSane() {

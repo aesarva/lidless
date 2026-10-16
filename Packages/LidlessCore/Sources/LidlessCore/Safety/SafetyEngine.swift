@@ -23,6 +23,9 @@ public struct PowerReading: Equatable, Sendable {
 
 @MainActor public protocol LidMonitoring: AnyObject {
     func isLidClosed() -> Bool
+    /// Called on the main actor when the lid opens or closes (may also fire for other
+    /// power-management events; readers re-check `isLidClosed()`).
+    var onChange: (() -> Void)? { get set }
 }
 
 /// Gathers power/thermal/lid readings and hands them to `onReadings`.
@@ -57,6 +60,9 @@ public struct PowerReading: Equatable, Sendable {
         thermal.onChange = { [weak self] in
             MainActor.assumeIsolated { self?.refresh() }
         }
+        lid.onChange = { [weak self] in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
         let t = Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         }
@@ -70,6 +76,7 @@ public struct PowerReading: Equatable, Sendable {
         timer = nil
         power.onChange = nil
         thermal.onChange = nil
+        lid.onChange = nil
     }
 
     public func refresh() {

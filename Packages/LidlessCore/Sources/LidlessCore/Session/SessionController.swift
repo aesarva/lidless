@@ -10,6 +10,7 @@ import os
     @ObservationIgnored private let notifier: Notifier
     @ObservationIgnored private let settingsStore: SettingsStore
     @ObservationIgnored private let clock: WakeClock
+    @ObservationIgnored private let display: DisplayControlling
     @ObservationIgnored private let log = Logger(subsystem: "io.github.alexsarva.Lidless", category: "session")
 
     @ObservationIgnored private let safetyLog = Logger(subsystem: "io.github.alexsarva.Lidless", category: "safety")
@@ -20,6 +21,10 @@ import os
     public private(set) var readings: SafetyReadings?
     /// True while off and the most recent lid recovery failed (disablesleep may still be 1).
     @ObservationIgnored private var recoveryPending = false
+    /// Lid state from the previous readings, so lid close/open is handled once per edge.
+    @ObservationIgnored private var lastLidClosed = false
+    /// True while the lid is closed in lid mode and the screen was turned off for it.
+    @ObservationIgnored private var displayHeldForLid = false
     public var settings: LidlessSettings {
         didSet { settingsStore.save(settings) }
     }
@@ -30,8 +35,10 @@ import os
     }
 
     public init(assertions: SleepAssertionService, lid: LidSleepControlling, notifier: Notifier,
-                settingsStore: SettingsStore, clock: WakeClock) {
+                settingsStore: SettingsStore, clock: WakeClock,
+                display: DisplayControlling = NoDisplayControl()) {
         self.assertions = assertions
+        self.display = display
         self.lid = lid
         self.notifier = notifier
         self.settingsStore = settingsStore
@@ -74,6 +81,7 @@ import os
         if s.lidModeActive, !disableLidHandlingFailure() {
             recoveryPending = true
         }
+        displayHeldForLid = false
         notifier.cancelEndingSoon()
         switch reason {
         case .timerExpired, .safety: notifier.post(.sessionEnded(reason))
@@ -120,7 +128,8 @@ import os
         settings.keepDisplayOn = on
         guard session != nil else { return }
         do {
-            try assertions.acquire(keepDisplayOn: on)
+            // With the lid closed in lid mode the screen stays off; the choice applies on open.
+            try assertions.acquire(keepDisplayOn: on && !displayHeldForLid)
             mutateSession { $0.keepDisplayOn = on }
         } catch {
             log.error("re-acquire failed: \(String(describing: error), privacy: .public)")
@@ -158,6 +167,7 @@ import os
     public func update(readings: SafetyReadings) {
         self.readings = readings
         guard let s = session else {
+            lastLidClosed = readings.lidClosed
             startBlock = SafetyPolicy.canStart(readings, settings: settings.safety)
                 ? nil : .lowBattery(threshold: settings.safety.batteryThreshold)
             attemptRecovery()
@@ -179,6 +189,7 @@ import os
                 notifier.post(.lidModeSuspended(r))
             }
         }
+        handleLidTransition(closed: readings.lidClosed)
     }
 
     /// Keeps `.helperUnavailable` while a failed lid recovery is still pending.
@@ -205,6 +216,33 @@ import os
     }
 
     // MARK: - Private
+
+    /// Lid closed in lid mode: the Mac keeps running but the screen goes dark (unless an
+    /// external display is in use). Lid opened: the display choice applies again.
+    private func handleLidTransition(closed: Bool) {
+        let wasClosed = lastLidClosed
+        lastLidClosed = closed
+        guard let s = session else { return }
+        if closed, !wasClosed, s.lidModeActive, !display.hasExternalDisplay() {
+            if s.keepDisplayOn { _ = reacquire(keepDisplayOn: false) }
+            displayHeldForLid = true
+            display.sleepDisplayNow()
+        } else if !closed, displayHeldForLid {
+            displayHeldForLid = false
+            if s.keepDisplayOn { _ = reacquire(keepDisplayOn: true) }
+        }
+    }
+
+    private func reacquire(keepDisplayOn: Bool) -> Bool {
+        do {
+            try assertions.acquire(keepDisplayOn: keepDisplayOn)
+            return true
+        } catch {
+            log.error("re-acquire failed: \(String(describing: error), privacy: .public)")
+            notifier.post(.assertionFailed(String(describing: error)))
+            return false
+        }
+    }
 
     /// Disables lid mode. On failure the caller's state stays untouched (pmset may still be 1),
     /// `.helperUnavailable` is raised and posted once. Returns true on success.
