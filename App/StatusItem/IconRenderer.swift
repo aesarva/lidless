@@ -9,18 +9,62 @@ import LidlessCore
 /// thread, so everything the handler touches must be free of actor isolation.
 enum IconRenderer {
     static let pointSize = NSSize(width: 18, height: 18)
+    /// On air the glyph becomes a small lit ON AIR lamp, so a running session is visible
+    /// at a glance in any menu bar.
+    static let lampSize = NSSize(width: 24, height: 18)
     private static let warnColor = NSColor(srgbRed: 1, green: 0x9F / 255, blue: 0x0A / 255, alpha: 1)
+    private static let onAir = NSColor(srgbRed: 0xE0 / 255, green: 0x34 / 255, blue: 0x2A / 255, alpha: 1)
+    private static let onAirSpent = NSColor(srgbRed: 0x6E / 255, green: 0x1A / 255, blue: 0x15 / 255, alpha: 1)
 
     static func image(for p: StatusPresentation) -> NSImage {
-        let image = NSImage(size: pointSize, flipped: true) { rect in
-            let t = NSAffineTransform()
-            t.scale(by: rect.width / 24)
-            t.concat()
-            draw(p)
-            return true
+        switch p.glyph {
+        case .active, .timer, .lid:
+            let image = NSImage(size: lampSize, flipped: true) { _ in
+                drawLamp(p)
+                return true
+            }
+            image.isTemplate = false
+            return image
+        case .off, .attention:
+            let image = NSImage(size: pointSize, flipped: true) { rect in
+                let t = NSAffineTransform()
+                t.scale(by: rect.width / 24)
+                t.concat()
+                draw(p)
+                return true
+            }
+            image.isTemplate = p.glyph != .attention
+            return image
         }
-        image.isTemplate = p.glyph != .attention
-        return image
+    }
+
+    /// 24x18 pt, y-down. A red lamp with the white pulse; with a timer the lamp's lit part
+    /// is the remaining fraction (the light burns down); in lid mode a horizon line sits below.
+    private static func drawLamp(_ p: StatusPresentation) {
+        let lid = p.glyph == .lid
+        let lamp = NSRect(x: 1, y: lid ? 1.5 : 3, width: 22, height: lid ? 11 : 12)
+        let shape = NSBezierPath(roundedRect: lamp, xRadius: 3, yRadius: 3)
+        if p.glyph == .timer || (lid && p.progress != nil) {
+            onAirSpent.setFill()
+            shape.fill()
+            let remaining = min(1, max(0, p.progress ?? 1))
+            NSGraphicsContext.saveGraphicsState()
+            shape.addClip()
+            onAir.setFill()
+            NSRect(x: lamp.minX, y: lamp.minY, width: lamp.width * remaining, height: lamp.height).fill()
+            NSGraphicsContext.restoreGraphicsState()
+        } else {
+            onAir.setFill()
+            shape.fill()
+        }
+        let base = lamp.midY
+        NSColor.white.setStroke()
+        stroke(poly([(3.5, base), (7.5, base), (9.5, base - 3.6), (12.4, base + 3.6),
+                     (14.7, base - 1.8), (16.1, base), (20.5, base)]), width: 1.6)
+        if lid {
+            NSColor.labelColor.setStroke()
+            stroke(poly([(3, 16), (21, 16)]), width: 1.6)
+        }
     }
 
     private static func draw(_ p: StatusPresentation) {

@@ -22,11 +22,15 @@ struct SessionHeader: View {
                         .monospacedDigit()
                         .foregroundStyle(controller.startBlock != nil && controller.session == nil
                                          ? Studio.caution : Studio.inkDim)
-                        .fixedSize(horizontal: false, vertical: true)
+                        // Two lines always reserved: on/off/blocked captions never change the panel height.
+                        .lineLimit(2)
+                        .frame(height: 32, alignment: .topLeading)
                 }
             }
             Spacer(minLength: 0)
-            Toggle(isOn: Binding(get: { controller.session != nil }, set: { _ in controller.toggle() })) {
+            Toggle(isOn: Binding(get: { controller.session != nil }, set: { _ in
+                withAnimation(.easeInOut(duration: 0.2)) { controller.toggle() }
+            })) {
                 Text("Keep awake")
             }
             .labelsHidden()

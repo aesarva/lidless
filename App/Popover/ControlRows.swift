@@ -16,7 +16,10 @@ private struct SwitchRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(Studio.ink)
                 Text(detail).font(.system(size: 11)).foregroundStyle(detailColor)
-                    .fixedSize(horizontal: false, vertical: true)
+                    // Fixed two-line slot: switching states never resizes the panel.
+                    .lineLimit(2)
+                    .frame(height: 28, alignment: .topLeading)
+                    .help(detail)
             }
             Spacer(minLength: 8)
             Toggle(title, isOn: $isOn)

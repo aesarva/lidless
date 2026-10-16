@@ -87,7 +87,7 @@ enum SnapshotExporter {
         return HStack(spacing: 18) {
             ForEach(Array(states.enumerated()), id: \.offset) { _, p in
                 HStack(spacing: 3) {
-                    Image(nsImage: IconRenderer.image(for: p)).renderingMode(.template)
+                    Image(nsImage: IconRenderer.image(for: p)).renderingMode(p.glyph == .off ? .template : .original)
                     if let t = p.timerText { Text(t).font(.system(size: 13).monospacedDigit()) }
                 }
             }
