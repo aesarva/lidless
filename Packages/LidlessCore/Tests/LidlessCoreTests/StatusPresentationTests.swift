@@ -54,6 +54,16 @@ struct StatusPresentationTests {
         #expect(open.timerText == nil)
     }
 
+    @Test func progressChangesInWholePercents() {
+        let s = SessionState.active(Session(startedAt: t0, endsAt: t0 + 3 * 3600))
+        let a = StatusPresentation.make(state: s, attention: nil, showTimerText: false, now: t0 + 1)
+        let b = StatusPresentation.make(state: s, attention: nil, showTimerText: false, now: t0 + 2)
+        #expect(a == b)
+        #expect(a.progress == 1)
+        let end = StatusPresentation.make(state: s, attention: nil, showTimerText: false, now: t0 + 3 * 3600 - 1)
+        #expect(end.progress == 0.01)
+    }
+
     @Test func degenerateRangeAndClamping() {
         let bad = SessionState.active(Session(startedAt: t0, endsAt: t0))
         #expect(StatusPresentation.make(state: bad, attention: nil, showTimerText: false, now: t0).progress == 0)

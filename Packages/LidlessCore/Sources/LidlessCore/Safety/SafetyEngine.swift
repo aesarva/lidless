@@ -52,6 +52,10 @@ public struct PowerReading: Equatable, Sendable {
         self.onReadings = onReadings
     }
 
+    isolated deinit {
+        timer?.invalidate()
+    }
+
     public func start() {
         stop()
         power.onChange = { [weak self] in

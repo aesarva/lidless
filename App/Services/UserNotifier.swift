@@ -13,6 +13,9 @@ final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
     var safetySettings: () -> SafetySettings = { SafetySettings() }
     private let center = UNUserNotificationCenter.current()
     private let log = Logger(subsystem: "io.github.aesarva.Lidless", category: "ui")
+    /// Bumped by cancelEndingSoon(): an "ends in 5 minutes" post still waiting for the
+    /// notification settings (or the first permission prompt) is dropped once it is stale.
+    private var endingSoonGeneration = 0
 
     override init() {
         super.init()
@@ -62,10 +65,15 @@ final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
         let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         let center = self.center
         let log = self.log
+        let staleCheck: Int? = id == Self.endingSoonID ? endingSoonGeneration : nil
         center.getNotificationSettings { settings in
             let add: @Sendable () -> Void = {
-                center.add(request) { error in
-                    if let error { log.error("notification add failed: \(error.localizedDescription, privacy: .public)") }
+                Task { @MainActor in
+                    // The session stopped or was extended while this post was waiting.
+                    if let staleCheck, staleCheck != self.endingSoonGeneration { return }
+                    center.add(request) { error in
+                        if let error { log.error("notification add failed: \(error.localizedDescription, privacy: .public)") }
+                    }
                 }
             }
             if settings.authorizationStatus == .notDetermined {
@@ -80,6 +88,7 @@ final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
     }
 
     func cancelEndingSoon() {
+        endingSoonGeneration += 1
         center.removePendingNotificationRequests(withIdentifiers: [Self.endingSoonID])
         center.removeDeliveredNotifications(withIdentifiers: [Self.endingSoonID])
     }

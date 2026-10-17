@@ -17,6 +17,7 @@ final class PanelController {
     private var clickMonitor: Any?
     private var keyMonitor: Any?
     private var resignObserver: NSObjectProtocol?
+    private var frameObserver: NSObjectProtocol?
     var onClose: (() -> Void)?
     /// When the panel last closed. A click on the status item first takes key away from the
     /// panel (closing it) and only then fires the button: that click means "close", not "reopen".
@@ -51,10 +52,15 @@ final class PanelController {
         panel.contentView = host
         // Content height changes with state (a caption wraps, an install error appears):
         // keep the panel's top edge under the menu bar.
-        NotificationCenter.default.addObserver(
+        frameObserver = NotificationCenter.default.addObserver(
             forName: NSView.frameDidChangeNotification, object: host, queue: .main
         ) { [weak self] _ in MainActor.assumeIsolated { self?.reposition() } }
         host.postsFrameChangedNotifications = true
+    }
+
+    isolated deinit {
+        removeMonitors()
+        if let frameObserver { NotificationCenter.default.removeObserver(frameObserver) }
     }
 
     func toggle(below button: NSStatusBarButton) {
@@ -62,6 +68,8 @@ final class PanelController {
     }
 
     func show(below button: NSStatusBarButton) {
+        // The panel can be ordered out without close() (e.g. by the system): never stack monitors.
+        removeMonitors()
         anchor = button
         panel.contentView?.layoutSubtreeIfNeeded()
         reposition()
@@ -113,13 +121,17 @@ final class PanelController {
         guard isShown else { return }
         closedAt = Date()
         panel.orderOut(nil)
+        removeMonitors()
+        onClose?()
+    }
+
+    private func removeMonitors() {
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
         clickMonitor = nil
         keyMonitor = nil
         resignObserver = nil
-        onClose?()
     }
 
     private func reposition() {
