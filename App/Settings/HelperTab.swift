@@ -21,7 +21,13 @@ struct HelperTab: View {
                         run({ await helper.install() }, onSuccess: { controller.helperDidChange() })
                     }
                     Button("Uninstall…") {
-                        run({ await helper.uninstall() }, onSuccess: { controller.setLidMode(false) })
+                        // Turn lid mode off while the helper can still do it; the setting stays
+                        // off, so nothing turns it back on while the uninstall runs.
+                        let lidWasOn = controller.settings.lidModeEnabled
+                        controller.setLidMode(false)
+                        run({ await helper.uninstall() },
+                            onSuccess: { controller.helperDidChange() },
+                            onCancel: { if lidWasOn { controller.setLidMode(true) } })
                     }
                     if helper.isWorking { ProgressView().controlSize(.small) }
                 }
@@ -41,7 +47,8 @@ struct HelperTab: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func run(_ work: @escaping () async -> HelperError?, onSuccess: @escaping () -> Void = {}) {
+    private func run(_ work: @escaping () async -> HelperError?, onSuccess: @escaping () -> Void = {},
+                     onCancel: @escaping () -> Void = {}) {
         errorText = nil
         Task {
             guard let error = await work() else {
@@ -49,7 +56,7 @@ struct HelperTab: View {
                 return
             }
             switch error {
-            case .cancelled: break
+            case .cancelled: onCancel()
             case .invalidUserName(let m), .commandFailed(let m), .installFailed(let m): errorText = m
             }
         }

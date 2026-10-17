@@ -83,4 +83,16 @@ struct LidSleepServiceTests {
         try svc.disable()
         #expect(backend.setCalls == [true, false])
     }
+
+    /// The watchdog (or an uninstall) may remove the marker while lid mode is on:
+    /// what this process turned on it still turns off.
+    @Test func disableResetsWhatItEnabledEvenWithoutMarker() throws {
+        let (svc, backend, marker) = makeService()
+        try svc.enable()
+        try FileManager.default.removeItem(at: marker)
+        try svc.disable()
+        #expect(backend.setCalls == [true, false])
+        try svc.disable()
+        #expect(backend.setCalls == [true, false])
+    }
 }
