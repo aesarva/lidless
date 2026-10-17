@@ -191,6 +191,8 @@ These checks need a real MacBook and are not automated yet:
 - Statistics and widgets: session history, a desktop widget, a Control Center control.
 - Developer ID signing, notarization and an `SMAppService` helper.
 
+Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md) for the branch workflow (`main`, `develop`, one branch per change).
+
 ## License
 
 Lidless is free software under the [GNU General Public License v3.0](LICENSE).
