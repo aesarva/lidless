@@ -49,6 +49,15 @@ struct SessionControllerSafetyTests {
         #expect(!notifier.posted.contains(.sessionEnded(.appQuit)))
     }
 
+    @Test func repeatedLidEnableFailureNotifiesOnce() {
+        lid.failEnable = true
+        startWithLid()
+        c.setLidMode(false)
+        c.setLidMode(true)
+        #expect(lid.enableCalls == 2)
+        #expect(helperUnavailablePosts() == 1)
+    }
+
     @Test func lidEnableFailureKeepsSession() {
         lid.failEnable = true
         startWithLid()

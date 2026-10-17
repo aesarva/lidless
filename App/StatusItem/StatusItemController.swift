@@ -26,7 +26,8 @@ final class StatusItemController {
             button.action = #selector(clicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
-        closePanel = { [panel] in panel.close() }
+        // Weak: the panel's own SwiftUI content holds this closure.
+        closePanel = { [weak panel] in panel?.close() }
         refresh()
     }
 

@@ -165,11 +165,13 @@ import os
     }
 
     public func update(readings: SafetyReadings) {
-        self.readings = readings
+        // Observation does not compare values: an equal assignment would still redraw the panel.
+        if self.readings != readings { self.readings = readings }
         guard let s = session else {
             lastLidClosed = readings.lidClosed
-            startBlock = SafetyPolicy.canStart(readings, settings: settings.safety)
+            let block: StartBlock? = SafetyPolicy.canStart(readings, settings: settings.safety)
                 ? nil : .lowBattery(threshold: settings.safety.batteryThreshold)
+            if startBlock != block { startBlock = block }
             attemptRecovery()
             return
         }
@@ -284,8 +286,7 @@ import os
             mutateSession {
                 if !$0.lidModeActive { $0.lidModeSuspendedReason = .helperUnavailable }
             }
-            attention = .helperUnavailable
-            notifier.post(.lidModeSuspended(.helperUnavailable))
+            raiseHelperUnavailable()
         }
     }
 
