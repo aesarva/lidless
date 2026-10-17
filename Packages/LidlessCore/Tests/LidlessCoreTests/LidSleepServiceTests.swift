@@ -75,4 +75,12 @@ struct LidSleepServiceTests {
         #expect(!svc.recoverIfNeeded())
         #expect(FileManager.default.fileExists(atPath: marker.path))
     }
+
+    @Test func markerRemovedDuringDisableIsNotAFailure() throws {
+        let (svc, backend, marker) = makeService()
+        try svc.enable()
+        backend.onSet = { try? FileManager.default.removeItem(at: marker) }
+        try svc.disable()
+        #expect(backend.setCalls == [true, false])
+    }
 }

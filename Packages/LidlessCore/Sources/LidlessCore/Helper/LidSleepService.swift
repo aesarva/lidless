@@ -43,7 +43,11 @@ import os
         let fm = FileManager.default
         guard fm.fileExists(atPath: markerURL.path) else { return }
         try backend.setSleepDisabled(false)
-        try fm.removeItem(at: markerURL)
+        // Sleep is back to normal: a marker that is already gone (the watchdog's own reset,
+        // an overlapping recovery) is not a failure.
+        do {
+            try fm.removeItem(at: markerURL)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {}
     }
 
     @discardableResult
