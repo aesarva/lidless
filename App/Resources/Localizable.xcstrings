@@ -757,7 +757,7 @@
         }
       }
     },
-    "github.com/alexsarva/lidless": {
+    "github.com/aesarva/lidless": {
       "shouldTranslate": false
     },
     "helper install failed: %@": {

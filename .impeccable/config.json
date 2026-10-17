@@ -1,0 +1,71 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/assigned.html"
+        ],
+        "createdAt": "2026-10-16T12:47:52.293Z",
+        "reason": "assistant decided: pre-DESIGN.md decision-round sketches (spent hand, gitignored, never shipped); fonts there predate the documented system"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/model-pick.html"
+        ],
+        "createdAt": "2026-10-16T12:47:52.309Z",
+        "reason": "assistant decided: pre-DESIGN.md decision-round sketches (spent hand, gitignored, never shipped); fonts there predate the documented system"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/challenger-pulsar.html"
+        ],
+        "createdAt": "2026-10-16T12:47:52.323Z",
+        "reason": "assistant decided: pre-DESIGN.md decision-round sketches (spent hand, gitignored, never shipped); fonts there predate the documented system"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/canon.html"
+        ],
+        "createdAt": "2026-10-16T12:47:52.339Z",
+        "reason": "assistant decided: pre-DESIGN.md decision-round sketches (spent hand, gitignored, never shipped); fonts there predate the documented system"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/r1/assigned.html"
+        ],
+        "createdAt": "2026-10-16T12:47:52.355Z",
+        "reason": "assistant decided: pre-DESIGN.md decision-round sketches (spent hand, gitignored, never shipped); fonts there predate the documented system"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/r1/pick.html"
+        ],
+        "createdAt": "2026-10-16T12:47:52.371Z",
+        "reason": "assistant decided: pre-DESIGN.md decision-round sketches (spent hand, gitignored, never shipped); fonts there predate the documented system"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/r1/atlas.html"
+        ],
+        "createdAt": "2026-10-16T12:47:52.387Z",
+        "reason": "assistant decided: pre-DESIGN.md decision-round sketches (spent hand, gitignored, never shipped); fonts there predate the documented system"
+      }
+    ]
+  }
+}

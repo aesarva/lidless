@@ -15,7 +15,7 @@ import os
 
     private let backend: PrivilegedBackend
     private let markerURL: URL
-    private let log = Logger(subsystem: "io.github.alexsarva.Lidless", category: "helper")
+    private let log = Logger(subsystem: "io.github.aesarva.Lidless", category: "helper")
 
     public init(backend: PrivilegedBackend, markerURL: URL = LidSleepService.defaultMarkerURL) {
         self.backend = backend

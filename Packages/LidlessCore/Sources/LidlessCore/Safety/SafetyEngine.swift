@@ -32,7 +32,7 @@ public struct PowerReading: Equatable, Sendable {
 @MainActor public final class SafetyEngine {
     public static let pollInterval: TimeInterval = 15
 
-    private static let log = Logger(subsystem: "io.github.alexsarva.Lidless", category: "safety")
+    private static let log = Logger(subsystem: "io.github.aesarva.Lidless", category: "safety")
 
     private let power: PowerMonitoring
     private let thermal: ThermalMonitoring

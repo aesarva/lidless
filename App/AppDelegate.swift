@@ -35,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         // Design-review runs never touch the real helper, marker or the user's settings:
         // another Lidless may be running with lid mode on.
-        if Self.flag(args["DebugStartSession"]) || args["CapturePanelTo"] != nil {
+        if args["DebugStartSession"] != nil || args["CapturePanelTo"] != nil {
             lidControl = PreviewLid()
             let store = PreviewStore()
             store.settings.lidModeEnabled = true
@@ -77,7 +77,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.refresh()
         #if DEBUG
         // -DebugStartSession YES -OpenPanelOnLaunch YES: live panel captures for design review.
-        if Self.flag(args["DebugStartSession"]) { controller.start(.minutes(60)) }
+        if (args["DebugStartSession"] as? String)?.lowercased() == "indefinite" {
+            controller.start(.indefinite)
+        } else if Self.flag(args["DebugStartSession"]) {
+            controller.start(.minutes(60))
+        }
         if Self.flag(args["OpenPanelOnLaunch"]) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
                 MainActor.assumeIsolated { self?.statusItem.openPanel() }

@@ -3,7 +3,7 @@ import IOKit
 import os
 
 @MainActor public final class IORegistryLidMonitor: LidMonitoring {
-    private static let log = Logger(subsystem: "io.github.alexsarva.Lidless", category: "safety")
+    private static let log = Logger(subsystem: "io.github.aesarva.Lidless", category: "safety")
 
     /// Fires on IOPMrootDomain interest messages (clamshell open/close among them), so a
     /// lid change is seen at once instead of on the next 15 s poll.

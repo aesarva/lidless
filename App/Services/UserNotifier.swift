@@ -12,7 +12,7 @@ final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
     /// Current safety settings, read at post time (thresholds are user-configurable).
     var safetySettings: () -> SafetySettings = { SafetySettings() }
     private let center = UNUserNotificationCenter.current()
-    private let log = Logger(subsystem: "io.github.alexsarva.Lidless", category: "ui")
+    private let log = Logger(subsystem: "io.github.aesarva.Lidless", category: "ui")
 
     override init() {
         super.init()

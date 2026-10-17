@@ -1,6 +1,6 @@
 name: Lidless
 options:
-  bundleIdPrefix: io.github.alexsarva
+  bundleIdPrefix: io.github.aesarva
   deploymentTarget:
     macOS: "14.0"
 packages:
@@ -30,7 +30,7 @@ targets:
       - package: LidlessCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.alexsarva.Lidless
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.aesarva.Lidless
         PRODUCT_NAME: Lidless
         SWIFT_VERSION: "6.0"
         CODE_SIGN_IDENTITY: "-"
@@ -41,4 +41,4 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_HARDENED_RUNTIME: YES
         CURRENT_PROJECT_VERSION: "1"
-        MARKETING_VERSION: "0.1.0"
+        MARKETING_VERSION: "0.2.0"

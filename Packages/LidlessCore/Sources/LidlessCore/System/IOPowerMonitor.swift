@@ -4,7 +4,7 @@ import IOKit.ps
 import os
 
 @MainActor public final class IOPowerMonitor: PowerMonitoring {
-    private static let log = Logger(subsystem: "io.github.alexsarva.Lidless", category: "safety")
+    private static let log = Logger(subsystem: "io.github.aesarva.Lidless", category: "safety")
 
     public var onChange: (() -> Void)? {
         didSet { updateSource() }

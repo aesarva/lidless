@@ -5,7 +5,7 @@ import os
 
 /// Launch-at-login backed by `SMAppService.mainApp`; the system status is the source of truth.
 @MainActor @Observable final class LoginItem {
-    @ObservationIgnored private let log = Logger(subsystem: "io.github.alexsarva.Lidless", category: "ui")
+    @ObservationIgnored private let log = Logger(subsystem: "io.github.aesarva.Lidless", category: "ui")
     private var current = SMAppService.mainApp.status == .enabled
 
     var isEnabled: Bool {

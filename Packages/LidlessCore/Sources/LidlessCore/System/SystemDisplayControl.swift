@@ -5,7 +5,7 @@ import os
 /// Real display control: CoreGraphics for the external-display check, `pmset displaysleepnow`
 /// (no privileges needed) to turn the screens off.
 @MainActor public final class SystemDisplayControl: DisplayControlling {
-    nonisolated private static let log = Logger(subsystem: "io.github.alexsarva.Lidless", category: "session")
+    nonisolated private static let log = Logger(subsystem: "io.github.aesarva.Lidless", category: "session")
     private let runner: CommandRunner
 
     public init(runner: CommandRunner = ProcessCommandRunner()) {

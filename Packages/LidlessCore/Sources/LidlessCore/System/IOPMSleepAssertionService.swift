@@ -9,7 +9,7 @@ public enum AssertionError: Error, Equatable {
 
 /// Holds IOPM power assertions that keep the Mac (and optionally the display) awake.
 @MainActor public final class IOPMSleepAssertionService: SleepAssertionService {
-    private static let log = Logger(subsystem: "io.github.alexsarva.Lidless", category: "session")
+    private static let log = Logger(subsystem: "io.github.aesarva.Lidless", category: "session")
     private static let name = "Lidless session" as CFString
 
     private var held: [IOPMAssertionID] = []

@@ -11,9 +11,9 @@ import os
     @ObservationIgnored private let settingsStore: SettingsStore
     @ObservationIgnored private let clock: WakeClock
     @ObservationIgnored private let display: DisplayControlling
-    @ObservationIgnored private let log = Logger(subsystem: "io.github.alexsarva.Lidless", category: "session")
+    @ObservationIgnored private let log = Logger(subsystem: "io.github.aesarva.Lidless", category: "session")
 
-    @ObservationIgnored private let safetyLog = Logger(subsystem: "io.github.alexsarva.Lidless", category: "safety")
+    @ObservationIgnored private let safetyLog = Logger(subsystem: "io.github.aesarva.Lidless", category: "safety")
 
     public private(set) var state: SessionState = .off
     public private(set) var attention: SafetyReason?
