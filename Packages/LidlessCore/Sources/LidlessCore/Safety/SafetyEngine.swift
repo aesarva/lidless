@@ -63,9 +63,11 @@ public struct PowerReading: Equatable, Sendable {
         lid.onChange = { [weak self] in
             MainActor.assumeIsolated { self?.refresh() }
         }
-        let t = Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         }
+        // Common modes: safety checks keep running while a menu or an alert is open.
+        RunLoop.main.add(t, forMode: .common)
         timer = t
         Self.log.debug("safety engine started")
         refresh()

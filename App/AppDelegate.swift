@@ -97,13 +97,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         #endif
 
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        let tick = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.controller.tick()
                 self.statusItem.refresh()
             }
         }
+        // Common modes: the session must end on time while a menu or an alert is open too.
+        RunLoop.main.add(tick, forMode: .common)
+        tickTimer = tick
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
