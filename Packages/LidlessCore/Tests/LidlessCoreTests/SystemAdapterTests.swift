@@ -35,6 +35,32 @@ struct SystemAdapterTests {
         #expect(!ours(after.stdout))
     }
 
+    /// waitUntilExit() would spin the main run loop: timers and main-queue work would then
+    /// run in the middle of a SessionController state change.
+    @Test func runnerDoesNotSpinTheRunLoop() throws {
+        final class Count: @unchecked Sendable { var value = 0 }
+        let fired = Count()
+        let timer = Timer(timeInterval: 0.02, repeats: true) { _ in fired.value += 1 }
+        RunLoop.main.add(timer, forMode: .common)
+        defer { timer.invalidate() }
+        let r = try ProcessCommandRunner().run("/bin/sleep", ["0.3"])
+        #expect(r.exitCode == 0)
+        #expect(fired.value == 0)
+    }
+
+    @Test func runnerKillsACommandPastItsTimeout() {
+        let started = Date()
+        #expect(throws: CommandError.timedOut("/bin/sleep 10")) {
+            try ProcessCommandRunner().run("/bin/sleep", ["10"], timeout: 0.2)
+        }
+        #expect(Date().timeIntervalSince(started) < 3)
+    }
+
+    @Test func runnerCapturesOutput() throws {
+        let r = try ProcessCommandRunner().run("/bin/sh", ["-c", "echo out; echo err >&2; exit 3"])
+        #expect(r == CommandResult(exitCode: 3, stdout: "out\n", stderr: "err\n"))
+    }
+
     @Test func powerReadingIsSane() {
         let monitor = IOPowerMonitor()
         if let level = monitor.current().batteryLevel { #expect((0...100).contains(level)) }

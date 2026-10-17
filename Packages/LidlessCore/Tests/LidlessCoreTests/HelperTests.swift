@@ -56,6 +56,7 @@ private func makeBackend(
         let backend = makeBackend(runner: runner)
         try backend.setSleepDisabled(true)
         #expect(runner.calls == [["/usr/bin/sudo", "-n", "/usr/bin/pmset", "-a", "disablesleep", "1"]])
+        #expect(runner.timeouts == [FakeCommandRunner.defaultTimeout])
 
         runner.setResponse("/usr/bin/sudo -n /usr/bin/pmset -a disablesleep 0",
                            CommandResult(exitCode: 1, stdout: "", stderr: "a password is required"))
@@ -119,6 +120,8 @@ private func makeBackend(
         #expect(runner.calls.count == 1)
         #expect(runner.calls[0][0] == "/usr/bin/osascript")
         #expect(runner.calls[0][1] == "-e")
+        // The password prompt waits for the user: no time limit.
+        #expect(runner.timeouts == [nil])
         let cmd = backend.installCommand(ruleText: try SudoersRule.render(userName: "alex"))
         #expect(runner.calls[0][2] == "do shell script " + SudoersBackend.appleScriptString(cmd) + " with administrator privileges")
         // The app must not write the rule anywhere.
