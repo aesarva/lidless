@@ -59,6 +59,7 @@ final class StatusItemController {
             item.menu = QuickMenu.build(
                 controller: controller,
                 helperInstalled: helper.status == .installed,
+                helperBusy: helper.isWorking,
                 onSettings: openSettings
             )
             item.button?.performClick(nil)

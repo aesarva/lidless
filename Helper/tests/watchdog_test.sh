@@ -21,6 +21,13 @@ out=$(LIDLESS_MARKER="$M" LIDLESS_PROCESS_NAME="sleep" bash "$WD" --dry-run)
 [ "$out" = "noop" ] || fail "expected noop (process alive), got '$out'"
 [ -e "$M" ] || fail "marker should remain"
 
+# A process with the right name but another owner (root's logd) does not count
+# (skipped where pgrep cannot see other users' processes, e.g. a sandbox).
+if pgrep -x logd >/dev/null; then
+    out=$(LIDLESS_MARKER="$M" LIDLESS_PROCESS_NAME="logd" bash "$WD" --dry-run)
+    [ "$out" = "reset" ] || fail "expected reset (process owned by another user), got '$out'"
+fi
+
 rm -f "$M"
 out=$(LIDLESS_MARKER="$M" LIDLESS_PROCESS_NAME="lidless-no-such-proc-$$" bash "$WD" --dry-run)
 [ "$out" = "noop" ] || fail "expected noop (no marker), got '$out'"
