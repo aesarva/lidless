@@ -111,6 +111,89 @@ import Testing
         #expect(guardian.isIdle)
     }
 
+    @Test func performWhileUnheldRunsBody() throws {
+        let (guardian, _, _) = make(initial: false)
+        #expect(try guardian.performWhileUnheld { 42 } == 42)
+    }
+
+    @Test func performWhileUnheldRefusesWhileHeld() throws {
+        let (guardian, _, _) = make(initial: false)
+        try guardian.acquire(a)
+        var ran = false
+        #expect(throws: HelperError.commandFailed("busy: closed-lid mode is active")) {
+            try guardian.performWhileUnheld { ran = true }
+        }
+        #expect(!ran)
+    }
+
+    @Test func acquireWaitsForPerformWhileUnheldBody() throws {
+        let (guardian, setting, _) = make(initial: false)
+        let entered = DispatchSemaphore(value: 0)
+        let proceed = DispatchSemaphore(value: 0)
+        let acquired = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            _ = try? guardian.performWhileUnheld {
+                entered.signal()
+                proceed.wait()
+            }
+        }
+        entered.wait()
+        let holder = a
+        DispatchQueue.global().async {
+            try? guardian.acquire(holder)
+            acquired.signal()
+        }
+        #expect(acquired.wait(timeout: .now() + 0.2) == .timedOut)
+        #expect(setting.fileExistedAtAttempt.isEmpty)
+        proceed.signal()
+        #expect(acquired.wait(timeout: .now() + 2) == .success)
+        #expect(setting.writes == [true])
+    }
+
+    @Test func acquireAfterShutdownThrowsAndWritesNothing() throws {
+        let (guardian, setting, store) = make(initial: false)
+        try guardian.shutdown()
+        #expect(throws: HelperError.commandFailed("shutting down")) { try guardian.acquire(a) }
+        #expect(setting.fileExistedAtAttempt.isEmpty)
+        #expect(!store.exists())
+        #expect(throws: HelperError.commandFailed("shutting down")) {
+            try guardian.performWhileUnheld {}
+        }
+    }
+
+    @Test func shutdownReleasesAllHolders() throws {
+        let (guardian, setting, store) = make(initial: false)
+        try guardian.acquire(a)
+        try guardian.acquire(b)
+        try guardian.shutdown()
+        #expect(setting.writes == [true, false])
+        #expect(!store.exists())
+        #expect(guardian.isIdle)
+    }
+
+    @Test func shutdownWithFailingResetStillCloses() throws {
+        let (guardian, setting, store) = make(initial: false)
+        try guardian.acquire(a)
+        setting.failWriteZeroTimes = 1
+        #expect(throws: FakeSleepSettingError.self) { try guardian.shutdown() }
+        #expect(store.exists())
+        #expect(throws: HelperError.commandFailed("shutting down")) { try guardian.acquire(b) }
+        #expect(setting.writes == [true])
+    }
+
+    @Test func shutdownIfIdleClosesOnlyWhenIdle() throws {
+        let (guardian, setting, _) = make(initial: false)
+        try guardian.acquire(a)
+        #expect(!guardian.shutdownIfIdle())
+        setting.failWriteZeroTimes = 1
+        #expect(throws: FakeSleepSettingError.self) { try guardian.release(a) }
+        #expect(!guardian.shutdownIfIdle())
+        try guardian.retryPendingReset()
+        #expect(guardian.shutdownIfIdle())
+        #expect(throws: HelperError.commandFailed("shutting down")) { try guardian.acquire(b) }
+        #expect(setting.writes == [true, false])
+    }
+
     @Test func appliedWriteOneThenFailedRollbackStaysPending() throws {
         let (guardian, setting, store) = make(initial: false)
         setting.failWriteOne = true
@@ -355,6 +438,20 @@ import Testing
         #expect(throws: HelperError.commandFailed("boom")) {
             try PmsetSleepSetting(runner: runner).setDisabled(true)
         }
+    }
+
+    @Test func emptyStderrFallsBackToExitCode() {
+        let runner = FakeCommandRunner()
+        runner.fallback = CommandResult(exitCode: 1, stdout: "", stderr: "\n")
+        #expect(throws: HelperError.commandFailed("pmset failed (exit 1)")) {
+            try PmsetSleepSetting(runner: runner).setDisabled(false)
+        }
+    }
+
+    @Test func helperErrorMessageIsTheTextAlone() {
+        #expect(HelperError.message(for: HelperError.commandFailed("boom")) == "boom")
+        #expect(HelperError.message(for: HelperError.installFailed("")) == "command failed")
+        #expect(HelperError.message(for: FakeSleepSettingError()) == String(describing: FakeSleepSettingError()))
     }
 
     @Test func nonZeroExitOnReadIsCommandFailed() {

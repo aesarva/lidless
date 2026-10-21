@@ -84,7 +84,7 @@ public struct LegacyHelperCleaner: Sendable {
 
         if let dirFd, try markerExists(in: dirFd) {
             let result = try runner.run("/usr/bin/pmset", ["-a", "disablesleep", "0"])
-            if result.exitCode != 0 { throw HelperError.commandFailed(result.stderr) }
+            if result.exitCode != 0 { throw HelperError.commandFailed(result.failureText("pmset")) }
         }
 
         // 0 booted out, 3 / 113 not loaded. Anything else (or a timeout) aborts before deleting.

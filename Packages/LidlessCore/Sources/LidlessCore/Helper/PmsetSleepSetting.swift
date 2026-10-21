@@ -13,12 +13,12 @@ public struct PmsetSleepSetting: SleepSetting {
 
     public func isDisabled() throws -> Bool {
         let result = try runner.run("/usr/bin/pmset", ["-g"])
-        guard result.exitCode == 0 else { throw HelperError.commandFailed(result.stderr) }
+        guard result.exitCode == 0 else { throw HelperError.commandFailed(result.failureText("pmset")) }
         return PmsetParser.sleepDisabled(in: result.stdout)
     }
 
     public func setDisabled(_ disabled: Bool) throws {
         let result = try runner.run("/usr/bin/pmset", ["-a", "disablesleep", disabled ? "1" : "0"])
-        guard result.exitCode == 0 else { throw HelperError.commandFailed(result.stderr) }
+        guard result.exitCode == 0 else { throw HelperError.commandFailed(result.failureText("pmset")) }
     }
 }

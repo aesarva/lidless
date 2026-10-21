@@ -12,6 +12,14 @@ public struct CommandResult: Equatable, Sendable {
     }
 }
 
+public extension CommandResult {
+    /// stderr for an error message, or "<command> failed (exit N)" when it is empty.
+    func failureText(_ command: String) -> String {
+        let text = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? "\(command) failed (exit \(exitCode))" : text
+    }
+}
+
 public enum CommandError: Error, Equatable {
     /// The command ran past its time limit and was killed.
     case timedOut(String)

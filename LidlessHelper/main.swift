@@ -12,7 +12,7 @@ do {
     try sleepGuard.recoverAtStart()
 } catch {
     // Stays pending: the daemon retries it and does not exit while it is pending.
-    log.error("recovery at start failed: \(String(describing: error), privacy: .public)")
+    log.error("recovery at start failed: \(HelperError.message(for: error), privacy: .public)")
 }
 
 // launchd sends SIGTERM on unregister, Login Items toggle and shutdown.
@@ -21,9 +21,10 @@ let sigterm = DispatchSource.makeSignalSource(
     signal: SIGTERM, queue: DispatchQueue(label: "io.github.aesarva.Lidless.helper.sigterm"))
 sigterm.setEventHandler {
     do {
-        try sleepGuard.releaseAll()
+        // Closes the guard too: an acquire still in flight cannot set 1 before exit.
+        try sleepGuard.shutdown()
     } catch {
-        log.error("release on SIGTERM failed: \(String(describing: error), privacy: .public)")
+        log.error("release on SIGTERM failed: \(HelperError.message(for: error), privacy: .public)")
     }
     log.notice("SIGTERM, exiting")
     exit(0)
@@ -31,10 +32,13 @@ sigterm.setEventHandler {
 sigterm.resume()
 
 let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-let daemon = Daemon(guard: sleepGuard, cleaner: LegacyHelperCleaner(), version: version)
+let lifecycle = HelperLifecycle(guard: sleepGuard, scheduler: DispatchHelperScheduler()) {
+    exit(0)
+}
+let daemon = Daemon(guard: sleepGuard, cleaner: LegacyHelperCleaner(), version: version, lifecycle: lifecycle)
 let listener = NSXPCListener(machServiceName: HelperIDs.helper)
 listener.delegate = daemon
 listener.resume()
-daemon.reevaluate()
+lifecycle.reevaluate()
 log.notice("listening, version \(version, privacy: .public)")
 dispatchMain()

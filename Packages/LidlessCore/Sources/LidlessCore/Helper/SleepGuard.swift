@@ -54,6 +54,8 @@ public final class SleepGuard: @unchecked Sendable {
     private let lock = NSLock()
     private var holders: Set<UUID> = []
     private var marker = Marker.none
+    /// Set on the way out (SIGTERM or idle exit): no acquire may set 1 after the last reset.
+    private var closed = false
 
     public init(setting: SleepSetting, store: OwnershipStore) {
         self.setting = setting
@@ -73,6 +75,7 @@ public final class SleepGuard: @unchecked Sendable {
 
     public func acquire(_ holder: UUID) throws {
         lock.lock(); defer { lock.unlock() }
+        if closed { throw HelperError.commandFailed("shutting down") }
         if holders.isEmpty {
             // Read the real value even when owned: a failed earlier reset may have left it at 0.
             if try !setting.isDisabled() {
@@ -111,6 +114,33 @@ public final class SleepGuard: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         holders.removeAll()
         try cleanUpIfUnheld()
+    }
+
+    /// `releaseAll()` that also closes the guard, so an acquire racing the exit cannot set 1.
+    /// Closed even when the reset fails (the marker then stays for `recoverAtStart`).
+    public func shutdown() throws {
+        lock.lock(); defer { lock.unlock() }
+        closed = true
+        holders.removeAll()
+        try cleanUpIfUnheld()
+    }
+
+    /// Closes the guard if nothing is held or pending; returns whether it did (then the daemon
+    /// may exit without leaving anything behind).
+    public func shutdownIfIdle() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard holders.isEmpty, marker == .none else { return false }
+        closed = true
+        return true
+    }
+
+    /// Runs `body` under the guard's lock, so no acquire or reset interleaves with it. Refused
+    /// while anyone holds: the 0.2.0 cleanup writes `disablesleep 0` and would end their session.
+    public func performWhileUnheld<T>(_ body: () throws -> T) throws -> T {
+        lock.lock(); defer { lock.unlock() }
+        if closed { throw HelperError.commandFailed("shutting down") }
+        guard holders.isEmpty else { throw HelperError.commandFailed("busy: closed-lid mode is active") }
+        return try body()
     }
 
     /// Call only at daemon start, before accepting connections.

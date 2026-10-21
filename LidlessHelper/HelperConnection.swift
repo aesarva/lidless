@@ -3,7 +3,7 @@ import LidlessCore
 import os
 
 /// The object exported to one client connection. `holder` names this connection in
-/// `SleepGuard`; the connection's invalidation handler releases it.
+/// `SleepGuard`; the connection's invalidation handler calls `markClosed()` and then releases it.
 /// Methods run on XPC queues and may block for seconds inside pmset.
 final class HelperConnection: NSObject, HelperProtocol {
     private static let log = Logger(subsystem: HelperIDs.helper, category: "daemon")
@@ -14,6 +14,8 @@ final class HelperConnection: NSObject, HelperProtocol {
     private let version: String
     /// Called after every `setSleepDisabled`, so the daemon can re-check its timers.
     private let onGuardChange: @Sendable () -> Void
+    private let lock = NSLock()
+    private var closed = false
 
     init(
         holder: UUID, guard sleepGuard: SleepGuard, cleaner: LegacyHelperCleaner, version: String,
@@ -26,19 +28,32 @@ final class HelperConnection: NSObject, HelperProtocol {
         self.onGuardChange = onGuardChange
     }
 
+    /// Set before the invalidation path releases the holder.
+    func markClosed() {
+        lock.withLock { closed = true }
+    }
+
+    private var isClosed: Bool { lock.withLock { closed } }
+
     func setSleepDisabled(_ disabled: Bool, reply: @escaping @Sendable (String?) -> Void) {
         defer { onGuardChange() }
         let action = disabled ? "acquire" : "release"
         do {
             if disabled {
                 try sleepGuard.acquire(holder)
+                // A message delivered after invalidation: its release may already have run,
+                // so let go here or the holder would keep disablesleep 1 forever.
+                if isClosed {
+                    try sleepGuard.release(holder)
+                    throw HelperError.commandFailed("connection closed")
+                }
             } else {
                 try sleepGuard.release(holder)
             }
             Self.log.notice("\(action, privacy: .public) \(self.holder, privacy: .public): ok")
             reply(nil)
         } catch {
-            let message = String(describing: error)
+            let message = HelperError.message(for: error)
             Self.log.error("\(action, privacy: .public) \(self.holder, privacy: .public) failed: \(message, privacy: .public)")
             reply(message)
         }
@@ -48,7 +63,7 @@ final class HelperConnection: NSObject, HelperProtocol {
         do {
             reply(version, try PmsetSleepSetting().isDisabled(), nil)
         } catch {
-            let message = String(describing: error)
+            let message = HelperError.message(for: error)
             Self.log.error("info: reading disablesleep failed: \(message, privacy: .public)")
             reply(version, false, message)
         }
@@ -56,11 +71,12 @@ final class HelperConnection: NSObject, HelperProtocol {
 
     func removeLegacyHelper(reply: @escaping @Sendable ([String], String?) -> Void) {
         do {
-            let removed = try cleaner.clean()
+            // Under the guard's lock and refused while lid mode is held: the cleanup writes 0.
+            let removed = try sleepGuard.performWhileUnheld { try cleaner.clean() }
             Self.log.notice("0.2.0 cleanup removed \(removed, privacy: .public)")
             reply(removed, nil)
         } catch {
-            let message = String(describing: error)
+            let message = HelperError.message(for: error)
             Self.log.error("0.2.0 cleanup failed: \(message, privacy: .public)")
             reply([], message)
         }
