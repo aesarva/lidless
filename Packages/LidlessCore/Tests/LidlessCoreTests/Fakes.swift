@@ -49,22 +49,124 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
         set { lock.lock(); defer { lock.unlock() }; _failNextSet = newValue }
     }
     var setCalls: [Bool] { lock.lock(); defer { lock.unlock() }; return _setCalls }
-    /// Runs after each recorded set, outside the lock (e.g. to race the marker).
-    nonisolated(unsafe) var onSet: (() -> Void)?
 
     func status() -> HelperStatus { stubStatus }
+    func refreshInfo() {}
     func install() throws {}
     func uninstall() throws {}
+    func legacyHelperPresent() -> Bool { false }
+    func removeLegacyHelper() throws -> [String] { [] }
+    func openSystemSettings() {}
     func setSleepDisabled(_ disabled: Bool) throws {
         lock.lock()
         _setCalls.append(disabled)
         let failure = _failNextSet
         _failNextSet = nil
         lock.unlock()
-        onSet?()
         if let failure { throw failure }
     }
     func isSleepDisabled() throws -> Bool { lock.lock(); defer { lock.unlock() }; return _setCalls.last ?? false }
+}
+
+final class FakeRegistration: HelperRegistration, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _status: RegistrationStatus
+    private var _registerCalls = 0
+    private var _unregisterCalls = 0
+    private var _openSettingsCalls = 0
+    private var _registerError: Error?
+    private var _statusAfterRegister: RegistrationStatus?
+
+    init(status: RegistrationStatus = .notRegistered) { _status = status }
+
+    var stubStatus: RegistrationStatus {
+        get { lock.withLock { _status } }
+        set { lock.withLock { _status = newValue } }
+    }
+    /// Thrown by every `register()`; the status stays as it was.
+    var registerError: Error? {
+        get { lock.withLock { _registerError } }
+        set { lock.withLock { _registerError = newValue } }
+    }
+    /// The status a successful `register()` leaves (default: `.enabled`).
+    var statusAfterRegister: RegistrationStatus? {
+        get { lock.withLock { _statusAfterRegister } }
+        set { lock.withLock { _statusAfterRegister = newValue } }
+    }
+    var registerCalls: Int { lock.withLock { _registerCalls } }
+    var unregisterCalls: Int { lock.withLock { _unregisterCalls } }
+    var openSettingsCalls: Int { lock.withLock { _openSettingsCalls } }
+
+    var status: RegistrationStatus { stubStatus }
+
+    func register() throws {
+        lock.lock(); defer { lock.unlock() }
+        _registerCalls += 1
+        if let _registerError { throw _registerError }
+        _status = _statusAfterRegister ?? .enabled
+    }
+
+    func unregister() throws {
+        lock.withLock {
+            _unregisterCalls += 1
+            _status = .notRegistered
+        }
+    }
+
+    func openSystemSettings() { lock.withLock { _openSettingsCalls += 1 } }
+}
+
+final class FakeHelperClient: HelperClient, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _info = HelperInfo(version: "0.3.0", sleepDisabled: false)
+    private var _infoError: Error?
+    private var _setError: Error?
+    private var _setCalls: [Bool] = []
+    private var _infoCalls = 0
+    private var _removeLegacyResult: Result<[String], HelperError> = .success([])
+    private var _lostHandler: (@Sendable () -> Void)?
+
+    var stubInfo: HelperInfo {
+        get { lock.withLock { _info } }
+        set { lock.withLock { _info = newValue } }
+    }
+    var infoError: Error? {
+        get { lock.withLock { _infoError } }
+        set { lock.withLock { _infoError = newValue } }
+    }
+    var setError: Error? {
+        get { lock.withLock { _setError } }
+        set { lock.withLock { _setError = newValue } }
+    }
+    var removeLegacyResult: Result<[String], HelperError> {
+        get { lock.withLock { _removeLegacyResult } }
+        set { lock.withLock { _removeLegacyResult = newValue } }
+    }
+    var setCalls: [Bool] { lock.withLock { _setCalls } }
+    var infoCalls: Int { lock.withLock { _infoCalls } }
+
+    var onConnectionLost: (@Sendable () -> Void)? {
+        get { lock.withLock { _lostHandler } }
+        set { lock.withLock { _lostHandler = newValue } }
+    }
+
+    func setSleepDisabled(_ disabled: Bool) throws {
+        lock.lock(); defer { lock.unlock() }
+        _setCalls.append(disabled)
+        if let _setError { throw _setError }
+    }
+
+    func info() throws -> HelperInfo {
+        lock.lock(); defer { lock.unlock() }
+        _infoCalls += 1
+        if let _infoError { throw _infoError }
+        return _info
+    }
+
+    func removeLegacyHelper() throws -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return try _removeLegacyResult.get()
+    }
 }
 
 // MARK: - Session controller fakes

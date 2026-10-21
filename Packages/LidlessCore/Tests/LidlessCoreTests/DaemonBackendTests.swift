@@ -1,0 +1,187 @@
+import Foundation
+import Testing
+@testable import LidlessCore
+
+private struct RegisterError: LocalizedError {
+    var errorDescription: String? { "Operation not permitted" }
+}
+
+private func makeBackend(
+    _ status: RegistrationStatus = .enabled, client: FakeHelperClient? = FakeHelperClient(),
+    appVersion: String = "0.3.0", root: URL = URL(fileURLWithPath: "/nonexistent-lidless-root")
+) -> (DaemonBackend, FakeRegistration) {
+    let registration = FakeRegistration(status: status)
+    let backend = DaemonBackend(registration: registration, client: client, appVersion: appVersion,
+                                legacy: LegacyHelperCleaner(root: root, runner: FakeCommandRunner()))
+    return (backend, registration)
+}
+
+@Suite struct DaemonBackendTests {
+    @Test func statusMapping() {
+        #expect(makeBackend(.notRegistered).0.status() == .notInstalled)
+        #expect(makeBackend(.requiresApproval).0.status() == .needsApproval)
+        if case .error = makeBackend(.notFound).0.status() {} else { Issue.record("notFound is not .error") }
+        #expect(makeBackend(.enabled, client: nil).0.status() == .unsigned)
+        #expect(makeBackend(.notRegistered, client: nil).0.status() == .unsigned)
+
+        let client = FakeHelperClient()
+        let (backend, _) = makeBackend(.enabled, client: client)
+        // No XPC from status(): installed until a refresh says otherwise.
+        #expect(backend.status() == .installed)
+        #expect(client.infoCalls == 0)
+        backend.refreshInfo()
+        #expect(client.infoCalls == 1)
+        #expect(backend.status() == .installed)
+    }
+
+    @Test func infoFailureIsErrorUntilNextRefresh() {
+        let client = FakeHelperClient()
+        let (backend, _) = makeBackend(client: client)
+        client.infoError = HelperError.commandFailed("timed out")
+        backend.refreshInfo()
+        #expect(backend.status() == .error("timed out"))
+        client.infoError = nil
+        backend.refreshInfo()
+        #expect(backend.status() == .installed)
+    }
+
+    @Test func refreshInfoDoesNothingUnlessEnabled() {
+        let client = FakeHelperClient()
+        let (backend, _) = makeBackend(.requiresApproval, client: client)
+        backend.refreshInfo()
+        #expect(client.infoCalls == 0)
+        makeBackend(.enabled, client: nil).0.refreshInfo()
+    }
+
+    @Test func installRegistersAndOpensSettingsWhenApprovalNeeded() throws {
+        let (backend, registration) = makeBackend(.notRegistered)
+        registration.statusAfterRegister = .requiresApproval
+        try backend.install()
+        #expect(registration.registerCalls == 1)
+        #expect(registration.openSettingsCalls == 1)
+        #expect(backend.status() == .needsApproval)
+    }
+
+    @Test func installThatEnablesDoesNotOpenSettings() throws {
+        let (backend, registration) = makeBackend(.notRegistered)
+        try backend.install()
+        #expect(registration.registerCalls == 1)
+        #expect(registration.openSettingsCalls == 0)
+        #expect(backend.status() == .installed)
+    }
+
+    /// SMAppService.register() throws while the user has not approved the daemon yet.
+    @Test func registerErrorWhileAwaitingApprovalOpensSettings() throws {
+        let (backend, registration) = makeBackend(.requiresApproval)
+        registration.registerError = RegisterError()
+        try backend.install()
+        #expect(registration.openSettingsCalls == 1)
+    }
+
+    @Test func installFailureIsInstallFailed() {
+        let (backend, registration) = makeBackend(.notRegistered)
+        registration.registerError = RegisterError()
+        #expect(throws: HelperError.installFailed("Operation not permitted")) { try backend.install() }
+        #expect(registration.openSettingsCalls == 0)
+    }
+
+    @Test func uninstallUnregisters() throws {
+        let (backend, registration) = makeBackend(.enabled)
+        try backend.uninstall()
+        #expect(registration.unregisterCalls == 1)
+        #expect(backend.status() == .notInstalled)
+    }
+
+    @Test func setSleepDisabledPassesThrough() throws {
+        let client = FakeHelperClient()
+        let (backend, _) = makeBackend(client: client)
+        try backend.setSleepDisabled(true)
+        try backend.setSleepDisabled(false)
+        #expect(client.setCalls == [true, false])
+
+        client.stubInfo = HelperInfo(version: "0.3.0", sleepDisabled: true)
+        #expect(try backend.isSleepDisabled() == true)
+    }
+
+    @Test func clientErrorBecomesCommandFailed() {
+        let client = FakeHelperClient()
+        let (backend, _) = makeBackend(client: client)
+        client.setError = HelperError.commandFailed("pmset failed")
+        #expect(throws: HelperError.commandFailed("pmset failed")) { try backend.setSleepDisabled(true) }
+        client.setError = FakeError()
+        #expect(throws: HelperError.self) { try backend.setSleepDisabled(true) }
+        client.infoError = HelperError.commandFailed("no reply")
+        #expect(throws: HelperError.commandFailed("no reply")) { try backend.isSleepDisabled() }
+    }
+
+    @Test func versionMismatchReregistersOnce() {
+        let client = FakeHelperClient()
+        client.stubInfo = HelperInfo(version: "0.2.9", sleepDisabled: false)
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        backend.refreshInfo()
+        #expect(registration.unregisterCalls == 1)
+        #expect(registration.registerCalls == 1)
+        backend.refreshInfo()
+        #expect(registration.unregisterCalls == 1)
+        #expect(registration.registerCalls == 1)
+        if case .error = backend.status() {} else { Issue.record("mismatch after re-registering is not .error") }
+
+        client.stubInfo = HelperInfo(version: "0.3.0", sleepDisabled: false)
+        backend.refreshInfo()
+        #expect(backend.status() == .installed)
+    }
+
+    @Test func unsignedNeverTouchesRegistration() {
+        let (backend, registration) = makeBackend(.notRegistered, client: nil)
+        if case .installFailed = thrown({ try backend.install() }) {} else {
+            Issue.record("install() did not throw installFailed")
+        }
+        #expect(throws: HelperError.self) { try backend.uninstall() }
+        #expect(throws: HelperError.self) { try backend.setSleepDisabled(true) }
+        #expect(registration.registerCalls == 0)
+        #expect(registration.unregisterCalls == 0)
+    }
+
+    @Test func legacyAndConnectionPassThrough() throws {
+        let client = FakeHelperClient()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("lidless-daemon-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (backend, registration) = makeBackend(client: client, root: root)
+        #expect(!backend.legacyHelperPresent())
+        let sudoers = root.appendingPathComponent("etc/sudoers.d")
+        try FileManager.default.createDirectory(at: sudoers, withIntermediateDirectories: true)
+        try Data().write(to: sudoers.appendingPathComponent("lidless"))
+        #expect(backend.legacyHelperPresent())
+
+        client.removeLegacyResult = .success(["/etc/sudoers.d/lidless"])
+        #expect(try backend.removeLegacyHelper() == ["/etc/sudoers.d/lidless"])
+        client.removeLegacyResult = .failure(.commandFailed("busy: closed-lid mode is active"))
+        #expect(throws: HelperError.commandFailed("busy: closed-lid mode is active")) {
+            try backend.removeLegacyHelper()
+        }
+
+        backend.openSystemSettings()
+        #expect(registration.openSettingsCalls == 1)
+
+        let fired = Counter()
+        backend.onConnectionLost = { fired.increment() }
+        client.onConnectionLost?()
+        #expect(fired.value == 1)
+    }
+}
+
+private func thrown(_ body: () throws -> Void) -> HelperError? {
+    do {
+        try body()
+        return nil
+    } catch {
+        return error as? HelperError
+    }
+}
+
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value = 0
+    var value: Int { lock.withLock { _value } }
+    func increment() { lock.withLock { _value += 1 } }
+}

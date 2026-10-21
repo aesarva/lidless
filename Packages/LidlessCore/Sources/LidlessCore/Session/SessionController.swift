@@ -191,6 +191,7 @@ import os
                 notifier.post(.lidModeSuspended(r))
             }
         }
+        retryHelperSuspendedLidMode()
         handleLidTransition(closed: readings.lidClosed)
     }
 
@@ -199,7 +200,7 @@ import os
         attention = recoveryPending ? .helperUnavailable : nil
     }
 
-    /// Resets a stale lid-mode marker. Call before the safety engine starts.
+    /// Undoes a closed-lid mode left behind by an earlier run. Call before the safety engine starts.
     public func recoverAtLaunch() {
         attemptRecovery()
     }
@@ -211,10 +212,27 @@ import os
         }
     }
 
-    /// Call after the helper was installed or removed: retries a pending lid recovery.
+    /// Call after the helper was installed or removed: retries a pending lid recovery, or
+    /// closed-lid mode that is waiting for the helper.
     public func helperDidChange() {
-        guard case .off = state else { return }
+        guard case .off = state else {
+            retryHelperSuspendedLidMode()
+            return
+        }
         attemptRecovery()
+    }
+
+    /// Call when the connection to the daemon dropped: the daemon has let go of this app's
+    /// `disablesleep`, so active closed-lid mode is applied again. If that fails, lid mode is
+    /// suspended as `.helperUnavailable` and the next readings retry it.
+    public func helperConnectionLost() {
+        guard let s = session, s.lidModeActive, settings.lidModeEnabled else { return }
+        if !enableLidMode() {
+            mutateSession {
+                $0.lidModeActive = false
+                $0.lidModeSuspendedReason = .helperUnavailable
+            }
+        }
     }
 
     // MARK: - Private
@@ -260,7 +278,7 @@ import os
         }
     }
 
-    /// While off: retries resetting a stale lid-mode marker. On failure raises and posts
+    /// While off: retries undoing a leftover closed-lid mode. On failure raises and posts
     /// `.helperUnavailable` once; on success leaves attention untouched.
     private func attemptRecovery() {
         recoveryPending = !lid.recoverIfNeeded()
@@ -273,21 +291,46 @@ import os
         notifier.post(.lidModeSuspended(.helperUnavailable))
     }
 
-    private func enableLidMode() {
+    /// Re-applying lid mode that is already active (after a lost connection) keeps
+    /// `lidModeEnabledAt`, so the battery time limit is not restarted.
+    @discardableResult
+    private func enableLidMode() -> Bool {
         do {
             try lid.enable()
             mutateSession {
+                if !$0.lidModeActive { $0.lidModeEnabledAt = clock.now }
                 $0.lidModeActive = true
-                $0.lidModeEnabledAt = clock.now
                 $0.lidModeSuspendedReason = nil
             }
+            return true
         } catch {
             log.error("lid enable failed: \(String(describing: error), privacy: .public)")
             mutateSession {
                 if !$0.lidModeActive { $0.lidModeSuspendedReason = .helperUnavailable }
             }
             raiseHelperUnavailable()
+            return false
         }
+    }
+
+    /// Lid mode the user wants but the helper could not apply: try again, unless the safety
+    /// rules would suspend it right away (then it waits for them to clear). A helper that is
+    /// not set up cannot answer, so it is not asked until it is (`helperDidChange`).
+    private func retryHelperSuspendedLidMode() {
+        guard let s = session, settings.lidModeEnabled, !s.lidModeActive,
+              s.lidModeSuspendedReason == .helperUnavailable else { return }
+        switch lid.helperStatus() {
+        case .installed, .error: break
+        case .notInstalled, .needsApproval, .unsigned: return
+        }
+        if let readings {
+            var enabled = s
+            enabled.lidModeActive = true
+            enabled.lidModeEnabledAt = clock.now
+            guard SafetyPolicy.evaluate(readings, session: enabled, settings: settings.safety) == .none
+            else { return }
+        }
+        enableLidMode()
     }
 
     private func mutateSession(_ body: (inout Session) -> Void) {

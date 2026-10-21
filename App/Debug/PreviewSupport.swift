@@ -31,10 +31,14 @@ final class PreviewBackend: PrivilegedBackend {
     let current: HelperStatus
     init(_ s: HelperStatus) { current = s }
     func status() -> HelperStatus { current }
+    func refreshInfo() {}
     func install() throws {}
     func uninstall() throws {}
     func setSleepDisabled(_ disabled: Bool) throws {}
     func isSleepDisabled() throws -> Bool { false }
+    func legacyHelperPresent() -> Bool { false }
+    func removeLegacyHelper() throws -> [String] { [] }
+    func openSystemSettings() {}
 }
 
 @MainActor func previewController(

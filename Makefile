@@ -3,9 +3,8 @@ export DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
 .PHONY: test
 test:
 	cd Packages/LidlessCore && swift test
-	shellcheck scripts/*.sh Helper/*.sh Helper/tests/*.sh
-	bash Helper/tests/watchdog_test.sh
-	plutil -lint Helper/app.lidless.watchdog.plist LidlessHelper/io.github.aesarva.Lidless.helper.plist
+	shellcheck scripts/*.sh
+	plutil -lint LidlessHelper/io.github.aesarva.Lidless.helper.plist
 
 .PHONY: generate build run
 generate:

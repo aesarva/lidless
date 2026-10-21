@@ -7,14 +7,30 @@ import LidlessCore
     @ObservationIgnored private let backend: PrivilegedBackend
     private(set) var status: HelperStatus
     private(set) var isWorking = false
+    @ObservationIgnored private var refreshingInfo = false
 
     init(backend: PrivilegedBackend) {
         self.backend = backend
         self.status = backend.status()
     }
 
+    /// Updates the status now, then again once the daemon has answered in the background.
     func refresh() {
-        status = backend.status()
+        updateStatus()
+        guard !refreshingInfo else { return }
+        refreshingInfo = true
+        let backend = self.backend
+        Task {
+            await Task.detached { backend.refreshInfo() }.value
+            refreshingInfo = false
+            updateStatus()
+        }
+    }
+
+    private func updateStatus() {
+        // Observation does not compare values: an equal assignment would still redraw.
+        let current = backend.status()
+        if current != status { status = current }
     }
 
     func install() async -> HelperError? {

@@ -13,19 +13,6 @@ targets:
     deploymentTarget: "14.0"
     sources:
       - path: App
-      # Explicit files (not the folder) so Helper/tests/ is not bundled.
-      - path: Helper/install.sh
-        buildPhase:
-          copyFiles: {destination: resources, subpath: Helper}
-      - path: Helper/uninstall.sh
-        buildPhase:
-          copyFiles: {destination: resources, subpath: Helper}
-      - path: Helper/watchdog.sh
-        buildPhase:
-          copyFiles: {destination: resources, subpath: Helper}
-      - path: Helper/app.lidless.watchdog.plist
-        buildPhase:
-          copyFiles: {destination: resources, subpath: Helper}
       # launchd plist of the daemon, registered via SMAppService.daemon(plistName:).
       - path: LidlessHelper/io.github.aesarva.Lidless.helper.plist
         buildPhase:

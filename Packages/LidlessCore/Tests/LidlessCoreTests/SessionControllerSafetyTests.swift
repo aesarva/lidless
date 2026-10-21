@@ -245,6 +245,127 @@ struct SessionControllerSafetyTests {
         #expect(c.session?.lidModeActive == true)
     }
 
+    // MARK: - Lost daemon connection
+
+    @Test func connectionLostReenablesLidMode() {
+        startWithLid()
+        clock.advance(60)
+        c.helperConnectionLost()
+        #expect(lid.enableCalls == 2)
+        #expect(c.session?.lidModeActive == true)
+        // The battery time limit keeps counting from the original enable.
+        #expect(c.session?.lidModeEnabledAt == t0)
+        #expect(notifier.posted.isEmpty)
+        #expect(c.attention == nil)
+    }
+
+    @Test func connectionLostAndReenableFailsSuspendsOnce() {
+        startWithLid()
+        lid.failEnable = true
+        c.helperConnectionLost()
+        c.helperConnectionLost()
+        #expect(lid.enableCalls == 2)
+        #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+        #expect(c.attention == .helperUnavailable)
+        #expect(helperUnavailablePosts() == 1)
+        #expect(c.settings.lidModeEnabled == true)
+    }
+
+    @Test func pollRetriesHelperSuspendedLidMode() {
+        startWithLid()
+        lid.failEnable = true
+        c.helperConnectionLost()
+        c.update(readings: readings())
+        #expect(c.session?.lidModeActive == false)
+        #expect(helperUnavailablePosts() == 1)
+
+        lid.failEnable = false
+        clock.advance(60)
+        c.update(readings: readings())
+        #expect(c.session?.lidModeActive == true)
+        #expect(c.session?.lidModeSuspendedReason == nil)
+        #expect(c.session?.lidModeEnabledAt == clock.now)
+    }
+
+    @Test func pollRetryWaitsWhileSafetyWouldSuspend() {
+        startWithLid()
+        lid.failEnable = true
+        c.helperConnectionLost()
+        lid.failEnable = false
+        let before = lid.enableCalls
+        c.update(readings: readings(thermal: .serious))
+        #expect(lid.enableCalls == before)
+        #expect(c.session?.lidModeActive == false)
+        c.update(readings: readings())
+        #expect(lid.enableCalls == before + 1)
+        #expect(c.session?.lidModeActive == true)
+    }
+
+    @Test func pollDoesNotRetryOtherSuspensions() {
+        startWithLid()
+        c.update(readings: readings(thermal: .serious))
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        c.update(readings: readings())
+        #expect(lid.enableCalls == 1)
+        #expect(c.session?.lidModeActive == false)
+    }
+
+    @Test func pollDoesNotRetryWhenLidModeTurnedOff() {
+        lid.failEnable = true
+        startWithLid()
+        c.setLidMode(false)
+        lid.failEnable = false
+        c.update(readings: readings())
+        #expect(lid.enableCalls == 1)
+    }
+
+    @Test func pollRetryWaitsForAUsableHelper() {
+        lid.failEnable = true
+        startWithLid()
+        lid.failEnable = false
+        for status in [HelperStatus.notInstalled, .needsApproval, .unsigned] {
+            lid.status = status
+            c.update(readings: readings())
+        }
+        #expect(lid.enableCalls == 1)
+        lid.status = .error("timed out")
+        c.update(readings: readings())
+        #expect(lid.enableCalls == 2)
+        #expect(c.session?.lidModeActive == true)
+    }
+
+    @Test func connectionLostWithoutLidModeDoesNothing() {
+        c.helperConnectionLost()
+        #expect(lid.enableCalls == 0)
+        c.start(.indefinite)
+        c.helperConnectionLost()
+        #expect(lid.enableCalls == 0)
+        #expect(notifier.posted.isEmpty)
+    }
+
+    /// A failed disable leaves lid mode active with the setting off: the lost connection
+    /// already released it, so it must not be turned back on.
+    @Test func connectionLostAfterUserTurnedLidModeOffDoesNotReenable() {
+        startWithLid()
+        lid.failDisable = true
+        c.setLidMode(false)
+        #expect(c.session?.lidModeActive == true)
+        c.helperConnectionLost()
+        #expect(lid.enableCalls == 1)
+    }
+
+    @Test func helperDidChangeRetriesSuspendedLidMode() {
+        lid.failEnable = true
+        startWithLid()
+        #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+        lid.failEnable = false
+        c.helperDidChange()
+        #expect(lid.enableCalls == 2)
+        #expect(c.session?.lidModeActive == true)
+        #expect(lid.recoverCalls == 0)
+    }
+
     @Test func setLidModeOnWhileActiveIsNoop() {
         startWithLid()
         clock.advance(60)

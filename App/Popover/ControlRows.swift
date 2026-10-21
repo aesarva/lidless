@@ -64,7 +64,7 @@ struct LidRow: View {
     private var detail: (String, Color) {
         if helper.isWorking { return (String(localized: "installing the helper…"), Studio.inkDim) }
         if let installError {
-            return (String(localized: "helper install failed: \(Self.describe(installError))"), Studio.caution)
+            return (String(localized: "helper install failed: \(installError.message)"), Studio.caution)
         }
         if helper.status != .installed {
             return (String(localized: "needs a one-time helper install"), Studio.caution)
@@ -103,7 +103,7 @@ struct LidRow: View {
             installError = nil
             let error = await helper.install()
             if let error {
-                if error != .cancelled { installError = error }
+                installError = error
                 return
             }
             controller.helperDidChange()
@@ -114,13 +114,6 @@ struct LidRow: View {
             // Decide on what the switch shows: after a failed disable the setting is off
             // but lid mode is still active, and a tap must retry the disable.
             controller.setLidMode(!isOn)
-        }
-    }
-
-    private static func describe(_ e: HelperError) -> String {
-        switch e {
-        case .cancelled: return ""
-        case .invalidUserName(let m), .commandFailed(let m), .installFailed(let m): return m
         }
     }
 }

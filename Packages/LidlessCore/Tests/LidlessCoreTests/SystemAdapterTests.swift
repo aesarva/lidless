@@ -4,6 +4,12 @@ import Foundation
 
 @MainActor
 struct SystemAdapterTests {
+    @Test func parsesSleepDisabled() {
+        #expect(PmsetParser.sleepDisabled(in: "Currently in use:\n SleepDisabled\t\t1\n") == true)
+        #expect(PmsetParser.sleepDisabled(in: "SleepDisabled 0") == false)
+        #expect(PmsetParser.sleepDisabled(in: "Currently in use:\n sleep 1\n") == false)
+    }
+
     @Test func settingsStoreRoundTripAndCorruption() throws {
         let suite = "lidless.tests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

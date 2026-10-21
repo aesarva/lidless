@@ -1,10 +1,9 @@
 import AppKit
 import LidlessCore
-import os
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private(set) var backend: SudoersBackend!
+    private(set) var backend: DaemonBackend!
     private(set) var lid: LidSleepService!
     /// The lid control the controller uses (the real service; a fake in debug review runs).
     private var lidControl: LidSleepControlling!
@@ -26,8 +25,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         #endif
-        let helperDir = Bundle.main.resourceURL!.appending(path: "Helper")
-        backend = SudoersBackend(runner: ProcessCommandRunner(), helperDirectory: helperDir, userName: NSUserName())
+        // Without a Team ID the daemon would refuse the connection: no client, `.unsigned`.
+        let client = CodeSigningRequirement
+            .requirement(identifier: HelperIDs.helper, teamID: CodeSigningRequirement.ownTeamID())
+            .map { XPCHelperClient(requirement: $0) }
+        backend = DaemonBackend(registration: SMAppServiceRegistration(), client: client,
+                                appVersion: Bundle.main.shortVersion)
         lid = LidSleepService(backend: backend)
         notifier = UserNotifier()
         let clock = SystemClock()
@@ -52,6 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             display: SystemDisplayControl()
         )
         self.controller = controller
+        backend.onConnectionLost = { [weak controller] in
+            Task { @MainActor in controller?.helperConnectionLost() }
+        }
         notifier.safetySettings = { [weak controller] in controller?.settings.safety ?? SafetySettings() }
         notifier.onExtend = { [weak controller] minutes in controller?.extend(byMinutes: minutes) }
 
@@ -70,12 +76,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             helper: helper,
             openSettings: { [weak self] tab in self?.settingsWindow.show(tab: tab) }
         )
-        // Order matters: reset a stale lid marker, then take the first readings
+        // Order matters: undo a leftover lid mode, then take the first readings
         // (engine.start() refreshes immediately), then start-on-launch sees them.
         controller.recoverAtLaunch()
         engine.start()
         controller.startOnLaunchIfEnabled()
         statusItem.refresh()
+        // Checks the daemon's version once at launch.
+        helper.refresh()
         #if DEBUG
         // -DebugStartSession YES -OpenPanelOnLaunch YES: live panel captures for design review.
         if (args["DebugStartSession"] as? String)?.lowercased() == "indefinite" {
@@ -108,10 +116,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Common modes: the session must end on time while a menu or an alert is open too.
         RunLoop.main.add(tick, forMode: .common)
         tickTimer = tick
-        // TEMP: probe, removed in Task 6
-        if ProcessInfo.processInfo.environment["LIDLESS_HELPER_PROBE"] == "1" {
-            DispatchQueue.global().async { Self.probeHelper() }
-        }
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -119,37 +123,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.engine.refresh()
                 self?.controller.tick()
             }
-        }
-    }
-
-    // TEMP: probe, removed in Task 6
-    /// Signed build: registers the daemon and asks it for `info`. Unsigned (ad-hoc) build:
-    /// skips registration (it is per bundle path) and calls the already registered daemon,
-    /// which must refuse it.
-    nonisolated private static func probeHelper() {
-        let log = Logger(subsystem: "io.github.aesarva.Lidless", category: "helper")
-        let teamID = CodeSigningRequirement.ownTeamID()
-        if teamID != nil {
-            let registration = SMAppServiceRegistration()
-            do {
-                try registration.register()
-            } catch {
-                log.error("probe: register failed: \(error.localizedDescription, privacy: .public)")
-            }
-            let status = registration.status
-            log.notice("probe: status \(String(describing: status), privacy: .public)")
-            if status == .requiresApproval { registration.openSystemSettings() }
-            guard status == .enabled else { return }
-        } else {
-            log.notice("probe: no Team ID, skipping registration")
-        }
-        let requirement = CodeSigningRequirement.requirement(identifier: HelperIDs.helper, teamID: teamID)
-            ?? #"identifier "\#(HelperIDs.helper)""#
-        do {
-            let info = try XPCHelperClient(requirement: requirement).info()
-            log.notice("probe: info version \(info.version, privacy: .public) disablesleep \(info.sleepDisabled, privacy: .public)")
-        } catch {
-            log.error("probe: info failed: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -166,7 +139,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Leave the Mac exactly as macOS would have it: the session's assertions go with the
         // process, and closed-lid mode (`pmset disablesleep`) is turned back off here.
         if case .active = controller.state { controller.stop(.appQuit) }
-        // A failed earlier reset (orange dot) gets one more try; the watchdog covers the rest.
+        // Kept for the protocol; the daemon also lets go when this process's connection closes.
         _ = lidControl.recoverIfNeeded()
+    }
+}
+
+private extension Bundle {
+    var shortVersion: String {
+        object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
     }
 }
