@@ -480,6 +480,21 @@ struct SessionControllerSafetyTests {
         #expect(lid.enableCalls == 1)
     }
 
+    /// Choosing another duration during the removal is the same session: lid mode comes back.
+    @Test func failedRemovalSurvivesARestart() {
+        startWithLid()
+        let point = c.beginHelperRemoval()
+        clock.advance(600)
+        c.restart(.minutes(60))
+        #expect(c.session?.startedAt != t0)
+        c.restoreAfterFailedRemoval(point)
+        #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+        c.update(readings: readings())
+        #expect(lid.enableCalls == 2)
+        #expect(c.session?.lidModeActive == true)
+        #expect(c.session?.lidModeEnabledAt == t0)
+    }
+
     @Test func failedRemovalWithLidModeOffStaysOff() {
         c.start(.indefinite)
         let point = c.beginHelperRemoval()
