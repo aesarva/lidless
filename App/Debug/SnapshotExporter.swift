@@ -18,13 +18,16 @@ enum SnapshotExporter {
                              to: dir.appendingPathComponent("popover-\(name)-\(suffix).png"))
                 }
                 let migrated = HelperModel(backend: PreviewBackend(.installed))
-                migrated.markLegacyRemovedForPreview()
+                migrated.previewLegacy(removed: true)
+                let legacyFailed = HelperModel(backend: PreviewBackend(.installed))
+                legacyFailed.previewLegacy(removed: false, error: "cannot unlink /etc/sudoers.d/lidless: Operation not permitted")
                 for (name, tab, helper) in [
                     ("general", SettingsTab.general, HelperModel(backend: PreviewBackend(.installed))),
                     ("safety", .safety, HelperModel(backend: PreviewBackend(.installed))),
                     ("helper", .helper, migrated),
                     ("helper-needs-approval", .helper, HelperModel(backend: PreviewBackend(.needsApproval))),
                     ("helper-unsigned", .helper, HelperModel(backend: PreviewBackend(.unsigned))),
+                    ("helper-legacy-error", .helper, legacyFailed),
                     ("about", .about, HelperModel(backend: PreviewBackend(.installed))),
                 ] {
                     let nav = SettingsNavigation()
@@ -65,6 +68,8 @@ enum SnapshotExporter {
             ("not-set-up", view(previewController(readings: previewReadings()), helper: .notInstalled)),
             ("needs-approval", view(previewController(lid: true, readings: previewReadings()), helper: .needsApproval)),
             ("unsigned", view(previewController(readings: previewReadings()), helper: .unsigned)),
+            ("helper-error", view(previewController(lid: true, readings: previewReadings()),
+                                  helper: .error("helper version 0.2.9 does not match Lidless 0.3.0"))),
         ]
     }
 

@@ -364,6 +364,53 @@ struct SessionControllerSafetyTests {
         #expect(c.session?.lidModeActive == true)
     }
 
+    /// Before the user has allowed the helper, turning lid mode on does not call it: lid mode
+    /// waits silently and turns on once the helper is usable.
+    @Test func lidModeWaitsSilentlyForApproval() {
+        for status in [HelperStatus.notInstalled, .needsApproval] {
+            let lid = FakeLid()
+            let notifier = FakeNotifier()
+            let c = SessionController(assertions: assertions, lid: lid, notifier: notifier,
+                                      settingsStore: MemorySettingsStore(), clock: clock)
+            c.start(.indefinite)
+            lid.status = status
+            c.setLidMode(true)
+            #expect(lid.enableCalls == 0)
+            #expect(c.session?.lidModeActive == false)
+            #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+            #expect(notifier.posted.isEmpty)
+            #expect(c.attention == nil)
+            lid.status = .installed
+            c.helperDidChange()
+            #expect(lid.enableCalls == 1)
+            #expect(c.session?.lidModeActive == true)
+            #expect(c.session?.lidModeSuspendedReason == nil)
+        }
+    }
+
+    @Test func startWithLidModeWaitsSilentlyForApproval() {
+        lid.status = .needsApproval
+        startWithLid()
+        #expect(lid.enableCalls == 0)
+        #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+        #expect(notifier.posted.isEmpty)
+        #expect(c.attention == nil)
+    }
+
+    /// A failed helper removal brings the setting back without acquiring lid mode or lifting
+    /// a safety suspension.
+    @Test func restoreLidModePreferenceOnlyRestoresTheSetting() {
+        startWithLid()
+        c.update(readings: readings(thermal: .serious))
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        c.setLidMode(false)
+        c.restoreLidModePreference(true)
+        #expect(c.settings.lidModeEnabled == true)
+        #expect(store.stored.lidModeEnabled == true)
+        #expect(c.session?.lidModeActive == false)
+        #expect(lid.enableCalls == 1)
+    }
+
     /// Loss of an older connection reported after lid mode was re-acquired on a newer one:
     /// ignored, and the hold is still released later.
     @Test func staleConnectionLossAfterReacquireIsIgnored() {

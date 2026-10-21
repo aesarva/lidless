@@ -69,8 +69,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onReadings: { [weak controller] readings in controller?.update(readings: readings) }
         )
 
-        let helper = HelperModel(backend: backend)
-        helper.lidModeHeld = { [weak controller] in controller?.session?.lidModeActive == true }
+        let helper = HelperModel(backend: backend, lidModeHeld: { [weak controller] in
+            controller?.session?.lidModeActive == true
+        })
         // Lid mode the user asked for while the helper waited for approval turns on now.
         helper.onBecameInstalled = { [weak controller] in controller?.helperDidChange() }
         settingsWindow = SettingsWindowController(controller: controller, helper: helper)
@@ -80,15 +81,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openSettings: { [weak self] tab in self?.settingsWindow.show(tab: tab) }
         )
         // Order matters: undo a leftover lid mode, then take the first readings
-        // (engine.start() refreshes immediately), then start-on-launch sees them. A 0.2.0
-        // helper left next to an approved daemon goes first: the daemon refuses to remove it
-        // while closed-lid mode is held.
+        // (engine.start() refreshes immediately), then start-on-launch sees them. The daemon
+        // removes a 0.2.0 helper itself when it starts, before any client can connect.
         controller.recoverAtLaunch()
         engine.start()
-        helper.removeLegacyHelperAtLaunch { [weak controller, weak self] in
-            controller?.startOnLaunchIfEnabled()
-            self?.statusItem.refresh()
-        }
+        controller.startOnLaunchIfEnabled()
+        statusItem.refresh()
         // Checks the daemon's version once at launch.
         helper.refresh()
         #if DEBUG

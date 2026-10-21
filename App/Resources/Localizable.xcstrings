@@ -164,12 +164,22 @@
         }
       }
     },
-    "Closed-lid mode unavailable — reinstall the helper in Settings": {
+    "Closed-lid mode paused: low battery": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Режим крышки недоступен — переустановите помощника в настройках"
+            "value": "Режим крышки приостановлен: низкий заряд"
+          }
+        }
+      }
+    },
+    "Closed-lid mode unavailable — check the helper in Settings": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Режим крышки недоступен — проверьте помощника в настройках"
           }
         }
       }
@@ -200,6 +210,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Не удалось запретить сон: %@"
+          }
+        }
+      }
+    },
+    "Couldn't remove the 0.2.0 helper: %@": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось удалить помощник 0.2.0: %@"
           }
         }
       }
@@ -816,16 +836,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "ошибка помощника: %@"
-          }
-        }
-      }
-    },
-    "helper is off in System Settings": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "помощник выключен в Системных настройках"
           }
         }
       }

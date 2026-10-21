@@ -26,7 +26,7 @@ struct HelperTab: View {
                         // HelperModel.onBecameInstalled tells the controller once it is allowed.
                         run { await helper.install() }
                     }
-                    .disabled(helper.status == .installed || helper.status == .unsigned)
+                    .disabled([HelperStatus.installed, .needsApproval, .unsigned].contains(helper.status))
                     Button("Remove") { remove() }
                         .disabled(helper.status == .notInstalled || helper.status == .unsigned)
                     if helper.isWorking { ProgressView().controlSize(.small) }
@@ -34,6 +34,8 @@ struct HelperTab: View {
                 .disabled(helper.isWorking)
                 if helper.legacyRemoved {
                     Text("The 0.2.0 helper was removed.").font(.caption).foregroundStyle(.secondary)
+                } else if let legacyError = helper.legacyError {
+                    Text("Couldn't remove the 0.2.0 helper: \(legacyError)").font(.caption).foregroundStyle(.red)
                 }
                 if let errorText {
                     Text(errorText).foregroundStyle(.red).font(.caption)
@@ -51,13 +53,14 @@ struct HelperTab: View {
     }
 
     /// Turns lid mode off while the helper can still do it; the setting stays off, so nothing
-    /// turns it back on while the removal runs. If the removal fails, the setting comes back.
+    /// turns it back on while the removal runs. If the removal fails, only the setting comes
+    /// back: lid mode is not acquired again behind the safety rules.
     private func remove() {
         let wasEnabled = controller.settings.lidModeEnabled
         controller.setLidMode(false)
         run({ await helper.uninstall() },
             onSuccess: { controller.helperDidChange() },
-            onFailure: { if wasEnabled { controller.setLidMode(true) } })
+            onFailure: { controller.restoreLidModePreference(wasEnabled) })
     }
 
     private func run(_ work: @escaping () async -> HelperError?,

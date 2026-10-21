@@ -153,6 +153,12 @@ import os
         }
     }
 
+    /// Brings back the lid-mode setting alone (e.g. after a failed helper removal): nothing is
+    /// acquired and a safety suspension stays in place.
+    public func restoreLidModePreference(_ on: Bool) {
+        settings.lidModeEnabled = on
+    }
+
     public func tick() {
         guard let s = session, let end = s.endsAt else { return }
         let now = clock.now
@@ -313,6 +319,17 @@ import os
     private func enableLidMode(keepingStart: Bool = false) -> Bool {
         mutateSession {
             if !keepingStart || $0.lidModeEnabledAt == nil { $0.lidModeEnabledAt = clock.now }
+        }
+        switch lid.helperStatus() {
+        case .notInstalled, .needsApproval:
+            // Waiting for the user to set up or allow the helper: nothing to call yet and
+            // nothing to warn about. `helperDidChange` / the poll retry turn it on later.
+            mutateSession {
+                if !$0.lidModeActive { $0.lidModeSuspendedReason = .helperUnavailable }
+            }
+            return false
+        case .installed, .unsigned, .error:
+            break
         }
         do {
             try lid.enable()

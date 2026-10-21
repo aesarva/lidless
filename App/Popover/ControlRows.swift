@@ -62,7 +62,7 @@ struct LidRow: View {
     }
 
     private var detail: (String, Color) {
-        if let installError, helper.status == .notInstalled {
+        if let installError {
             return (String(localized: "helper error: \(installError.message)"), Studio.caution)
         }
         switch helper.status {
@@ -72,9 +72,9 @@ struct LidRow: View {
             return (String(localized: "allow Lidless in System Settings → Login Items"), Studio.caution)
         case .unsigned:
             return (String(localized: "needs a signed build"), Studio.caution)
-        case .error where controller.settings.lidModeEnabled:
-            return (String(localized: "helper is off in System Settings"), Studio.caution)
-        case .installed, .error:
+        case .error(let message):
+            return (String(localized: "helper error: \(message)"), Studio.caution)
+        case .installed:
             break
         }
         if let reason = suspended {
@@ -103,6 +103,8 @@ struct LidRow: View {
             enabled: !helper.isWorking && helper.status != .unsigned,
             onAir: controller.session != nil
         )
+        // An install error is about the status it happened in.
+        .onChange(of: helper.status) { installError = nil }
     }
 
     private func tap() async {

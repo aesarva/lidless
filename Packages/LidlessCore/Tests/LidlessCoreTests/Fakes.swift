@@ -57,12 +57,36 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
     }
     var setCalls: [Bool] { lock.lock(); defer { lock.unlock() }; return _setCalls }
 
+    private var _legacyPresent = false
+    private var _removeLegacyError: HelperError?
+    private var _removeLegacyCalls = 0
+    private var _refreshInfoCalls = 0
+    /// What `legacyHelperPresent()` answers; a successful `removeLegacyHelper()` clears it.
+    var legacyPresent: Bool {
+        get { lock.withLock { _legacyPresent } }
+        set { lock.withLock { _legacyPresent = newValue } }
+    }
+    /// Thrown by every `removeLegacyHelper()` while set.
+    var removeLegacyError: HelperError? {
+        get { lock.withLock { _removeLegacyError } }
+        set { lock.withLock { _removeLegacyError = newValue } }
+    }
+    var removeLegacyCalls: Int { lock.withLock { _removeLegacyCalls } }
+    var refreshInfoCalls: Int { lock.withLock { _refreshInfoCalls } }
+
     func status() -> HelperStatus { stubStatus }
-    func refreshInfo() {}
+    func refreshInfo() { lock.withLock { _refreshInfoCalls += 1 } }
     func install() throws {}
     func uninstall() throws {}
-    func legacyHelperPresent() -> Bool { false }
-    func removeLegacyHelper() throws -> [String] { [] }
+    func legacyHelperPresent() -> Bool { legacyPresent }
+    func removeLegacyHelper() throws -> [String] {
+        try lock.withLock {
+            _removeLegacyCalls += 1
+            if let error = _removeLegacyError { throw error }
+            _legacyPresent = false
+            return ["/etc/sudoers.d/lidless"]
+        }
+    }
     func openSystemSettings() {}
     func setSleepDisabled(_ disabled: Bool) throws -> UInt64 {
         lock.lock()
@@ -231,6 +255,28 @@ struct FakeError: Error {}
         acquired.append(keepDisplayOn)
     }
     func release() { released += 1 }
+}
+
+/// `PollScheduler` driven by hand: `fire()` runs every active poll once.
+@MainActor final class ManualPollScheduler: PollScheduler {
+    final class Handle: PollHandle {
+        let tick: @MainActor () -> Void
+        var cancelled = false
+        init(tick: @escaping @MainActor () -> Void) { self.tick = tick }
+        func cancel() { cancelled = true }
+    }
+    var handles: [Handle] = []
+    var intervals: [TimeInterval] = []
+    var active: [Handle] { handles.filter { !$0.cancelled } }
+
+    func startPolling(every interval: TimeInterval, _ tick: @escaping @MainActor () -> Void) -> PollHandle {
+        let handle = Handle(tick: tick)
+        handles.append(handle)
+        intervals.append(interval)
+        return handle
+    }
+
+    func fire() { for h in active { h.tick() } }
 }
 
 @MainActor final class FakeNotifier: Notifier {
