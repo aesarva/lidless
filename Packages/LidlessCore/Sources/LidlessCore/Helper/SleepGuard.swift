@@ -4,6 +4,7 @@ import Foundation
 public protocol OwnershipStore: Sendable {
     func exists() -> Bool
     func create() throws
+    /// Removing a missing file is not an error.
     func remove() throws
 }
 
@@ -39,13 +40,20 @@ public struct FileOwnershipStore: OwnershipStore {
 /// the 1 was set by us. One lock covers whole operations so "file before 1, 0 before removing the
 /// file" never interleaves between XPC queues.
 public final class SleepGuard: @unchecked Sendable {
+    /// What the marker file means while it may exist.
+    private enum Marker {
+        case none
+        /// We may have set 1: clean up with write 0, then remove.
+        case owned
+        /// A failed create's leftover that does not mean ownership: clean up with remove only.
+        case stale
+    }
+
     private let setting: SleepSetting
     private let store: OwnershipStore
     private let lock = NSLock()
     private var holders: Set<UUID> = []
-    private var owned = false
-    /// A marker file may exist that does not mean we own disablesleep (a failed create's leftover).
-    private var staleMarker = false
+    private var marker = Marker.none
 
     public init(setting: SleepSetting, store: OwnershipStore) {
         self.setting = setting
@@ -54,36 +62,34 @@ public final class SleepGuard: @unchecked Sendable {
 
     public var isIdle: Bool {
         lock.lock(); defer { lock.unlock() }
-        return holders.isEmpty && !owned && !staleMarker
+        return holders.isEmpty && marker == .none
     }
 
     public func acquire(_ holder: UUID) throws {
         lock.lock(); defer { lock.unlock() }
         if holders.isEmpty {
-            // Read the real value even when `owned`: a failed earlier reset may have left it at 0.
+            // Read the real value even when owned: a failed earlier reset may have left it at 0.
             if try !setting.isDisabled() {
                 do {
                     try store.create()
                 } catch {
-                    // Nothing was written to pmset, so this claims no ownership. A leftover file
-                    // is only a marker to clean up (unless a pending reset already owns it).
-                    if !owned, store.exists() {
-                        do { try store.remove() } catch { staleMarker = true }
+                    // Nothing reached pmset, so this claims no ownership (a pending reset keeps its own).
+                    if marker != .owned {
+                        marker = .stale
+                        try? cleanUpIfUnheld()
                     }
                     throw error
                 }
+                // The write may land before failing: own it until a 0 is confirmed.
+                marker = .owned
                 do {
                     try setting.setDisabled(true)
                 } catch {
-                    // The write may have landed before failing: keep ownership until a 0 is confirmed.
-                    owned = true
-                    try? resetIfUnheld()
+                    try? cleanUpIfUnheld()
                     throw error
                 }
-                owned = true
-                staleMarker = false
-            } else {
-                owned = owned || (store.exists() && !staleMarker)
+            } else if marker == .none, store.exists() {
+                marker = .owned
             }
         }
         holders.insert(holder)
@@ -92,39 +98,40 @@ public final class SleepGuard: @unchecked Sendable {
     public func release(_ holder: UUID) throws {
         lock.lock(); defer { lock.unlock() }
         holders.remove(holder)
-        try resetIfUnheld()
+        try cleanUpIfUnheld()
     }
 
     public func releaseAll() throws {
         lock.lock(); defer { lock.unlock() }
         holders.removeAll()
-        try resetIfUnheld()
+        try cleanUpIfUnheld()
     }
 
     /// Call only at daemon start, before accepting connections.
     public func recoverAtStart() throws {
         lock.lock(); defer { lock.unlock() }
         guard store.exists() else { return }
-        owned = true
-        try resetIfUnheld()
+        marker = .owned
+        try cleanUpIfUnheld()
     }
 
-    /// Repeats a reset that failed earlier; does nothing unless one is pending and nobody holds.
+    /// Repeats a cleanup that failed earlier; does nothing unless one is pending and nobody holds.
     public func retryPendingReset() throws {
         lock.lock(); defer { lock.unlock() }
-        if staleMarker, holders.isEmpty, !owned {
-            try store.remove()
-            staleMarker = false
-            return
-        }
-        try resetIfUnheld()
+        try cleanUpIfUnheld()
     }
 
-    private func resetIfUnheld() throws {
-        guard holders.isEmpty, owned else { return }
-        try setting.setDisabled(false)
-        try store.remove()
-        owned = false
-        staleMarker = false
+    /// The only place a marker is cleared: after a confirmed 0 (when owned) and a successful remove.
+    private func cleanUpIfUnheld() throws {
+        guard holders.isEmpty else { return }
+        switch marker {
+        case .none: return
+        case .owned:
+            try setting.setDisabled(false)
+            try store.remove()
+        case .stale:
+            try store.remove()
+        }
+        marker = .none
     }
 }

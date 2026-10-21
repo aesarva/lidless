@@ -147,10 +147,60 @@ import Testing
         #expect(setting.writes.isEmpty)
         setting.value = true
         try guardian.acquire(a)
-        try guardian.release(a)
+        #expect(throws: FakeSleepSettingError.self) { try guardian.release(a) }
         #expect(setting.writes.isEmpty)
+        #expect(store.exists())
         store.failRemove = false
         try guardian.retryPendingReset()
+        #expect(!store.exists())
+        #expect(guardian.isIdle)
+        #expect(setting.writes.isEmpty)
+    }
+
+    @Test func staleMarkerIsRemovedOnRelease() throws {
+        let (guardian, setting, store) = make(initial: false)
+        store.failCreate = true
+        store.failCreateLeavesFile = true
+        store.failRemove = true
+        #expect(throws: FakeSleepSettingError.self) { try guardian.acquire(a) }
+        store.failRemove = false
+        setting.value = true
+        try guardian.acquire(a)
+        try guardian.release(a)
+        #expect(!store.exists())
+        #expect(guardian.isIdle)
+        #expect(setting.writes.isEmpty)
+        #expect(setting.value)
+    }
+
+    @Test func staleMarkerIsRemovedOnReleaseAllSoTheNextDaemonLeavesForeignOneAlone() throws {
+        let (guardian, setting, store) = make(initial: false)
+        store.failCreate = true
+        store.failCreateLeavesFile = true
+        store.failRemove = true
+        #expect(throws: FakeSleepSettingError.self) { try guardian.acquire(a) }
+        store.failRemove = false
+        try guardian.releaseAll()
+        #expect(!store.exists())
+        #expect(guardian.isIdle)
+        #expect(setting.writes.isEmpty)
+        setting.value = true
+        let next = SleepGuard(setting: setting, store: store)
+        try next.recoverAtStart()
+        #expect(setting.writes.isEmpty)
+        #expect(setting.value)
+        #expect(next.isIdle)
+    }
+
+    @Test func staleMarkerIsClearedWhenALaterCreateFailureRemovesTheFile() throws {
+        let (guardian, setting, store) = make(initial: false)
+        store.failCreate = true
+        store.failCreateLeavesFile = true
+        store.failRemove = true
+        #expect(throws: FakeSleepSettingError.self) { try guardian.acquire(a) }
+        #expect(!guardian.isIdle)
+        store.failRemove = false
+        #expect(throws: FakeSleepSettingError.self) { try guardian.acquire(a) }
         #expect(!store.exists())
         #expect(guardian.isIdle)
         #expect(setting.writes.isEmpty)
