@@ -57,7 +57,8 @@ public final class SudoersBackend: PrivilegedBackend {
 
     private func runPrivileged(_ shellCommand: String) throws {
         let script = "do shell script " + Self.appleScriptString(shellCommand) + " with administrator privileges"
-        let r = try runner.run("/usr/bin/osascript", ["-e", script])
+        // No time limit: the administrator password prompt waits for the user.
+        let r = try runner.run("/usr/bin/osascript", ["-e", script], timeout: nil)
         if r.exitCode == 0 { return }
         if r.stderr.contains("(-128)") { throw HelperError.cancelled }
         throw HelperError.installFailed(r.stderr)

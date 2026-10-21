@@ -23,9 +23,13 @@ final class FakeCommandRunner: CommandRunner, @unchecked Sendable {
         _responses[key] = result
     }
 
-    func run(_ executable: String, _ arguments: [String]) throws -> CommandResult {
+    private var _timeouts: [TimeInterval?] = []
+    var timeouts: [TimeInterval?] { lock.lock(); defer { lock.unlock() }; return _timeouts }
+
+    func run(_ executable: String, _ arguments: [String], timeout: TimeInterval?) throws -> CommandResult {
         lock.lock(); defer { lock.unlock() }
         _calls.append([executable] + arguments)
+        _timeouts.append(timeout)
         return _responses[([executable] + arguments).joined(separator: " ")] ?? _fallback
     }
 }
@@ -45,14 +49,20 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
         set { lock.lock(); defer { lock.unlock() }; _failNextSet = newValue }
     }
     var setCalls: [Bool] { lock.lock(); defer { lock.unlock() }; return _setCalls }
+    /// Runs after each recorded set, outside the lock (e.g. to race the marker).
+    nonisolated(unsafe) var onSet: (() -> Void)?
 
     func status() -> HelperStatus { stubStatus }
     func install() throws {}
     func uninstall() throws {}
     func setSleepDisabled(_ disabled: Bool) throws {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         _setCalls.append(disabled)
-        if let e = _failNextSet { _failNextSet = nil; throw e }
+        let failure = _failNextSet
+        _failNextSet = nil
+        lock.unlock()
+        onSet?()
+        if let failure { throw failure }
     }
     func isSleepDisabled() throws -> Bool { lock.lock(); defer { lock.unlock() }; return _setCalls.last ?? false }
 }

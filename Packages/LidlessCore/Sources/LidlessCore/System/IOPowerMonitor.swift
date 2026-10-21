@@ -15,7 +15,7 @@ import os
     public init() {}
 
     isolated deinit {
-        if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode) }
+        if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
     }
 
     public func current() -> PowerReading {
@@ -54,10 +54,11 @@ import os
                 Self.log.error("IOPSNotificationCreateRunLoopSource failed")
                 return
             }
-            CFRunLoopAddSource(CFRunLoopGetMain(), src, .defaultMode)
+            // Common modes: power changes arrive while a menu or an alert is open too.
+            CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
             source = src
         } else if onChange == nil, let src = source {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .defaultMode)
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes)
             source = nil
         }
     }

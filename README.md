@@ -83,13 +83,8 @@ Every rule can be turned off or tuned in **Settings → Safety**.
 
 1. Download `Lidless.dmg` from [Releases](https://github.com/aesarva/lidless/releases) and open it.
 2. Drag **Lidless** onto the **Applications** shortcut, then launch it. It lives only in the menu bar (no Dock icon).
-3. Releases are not yet signed with a Developer ID or notarized, so Gatekeeper blocks the first launch. Right-click the app and choose **Open**, or run:
 
-   ```sh
-   xattr -dr com.apple.quarantine /Applications/Lidless.app
-   ```
-
-Requires macOS 14 Sonoma or later, on Apple Silicon or Intel.
+Releases are signed with a Developer ID and notarized by Apple, so Lidless opens like any other app. Requires macOS 14 Sonoma or later, on Apple Silicon or Intel.
 
 ## Quick start
 
@@ -117,7 +112,7 @@ When the lid closes in closed-lid mode, Lidless turns the screen off (`pmset dis
 ### Security model
 
 - **The rule is narrow.** The sudoers rule allows exactly `pmset -a disablesleep 0|1`, for your user only, and nothing else. It is validated with `visudo` before it is installed.
-- **Until Lidless is signed with a Developer ID and registers its helper through `SMAppService`,** the helper scripts are copied from inside the app bundle at install time. That bundle is user-writable, so the install is only as trustworthy as the copy of Lidless you downloaded. Install the helper only from a copy you trust.
+- **Until Lidless registers its helper through `SMAppService`,** the helper scripts are copied from inside the app bundle at install time. Releases are signed and notarized, but an installed bundle is user-writable, so the install is only as trustworthy as the copy of Lidless on your disk. Install the helper only from a copy you trust.
 - **After installation** the sudoers rule and the watchdog live in root-owned locations. Uninstall runs `uninstall.sh` from the app bundle as root through the password prompt, so it shares the trust level of the bundle.
 - **If the helper breaks** while closed-lid mode is on (for example, the sudoers file was removed), Lidless keeps retrying every 15 seconds and shows the orange dot until normal sleep is restored; the watchdog restores it once Lidless quits.
 
@@ -189,7 +184,9 @@ These checks need a real MacBook and are not automated yet:
 - Automatic triggers: stay awake while an app runs, on power, with a display or a Wi-Fi network, during downloads, on a schedule.
 - Integrations: a global hotkey, a URL scheme, a CLI, Shortcuts actions.
 - Statistics and widgets: session history, a desktop widget, a Control Center control.
-- Developer ID signing, notarization and an `SMAppService` helper.
+- An `SMAppService` helper: no sudoers rule, approved in System Settings → Login Items.
+
+Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md) for the branch workflow (`main`, `develop`, one branch per change).
 
 ## License
 

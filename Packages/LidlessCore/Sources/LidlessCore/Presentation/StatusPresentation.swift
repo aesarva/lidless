@@ -31,7 +31,9 @@ public struct StatusPresentation: Equatable, Sendable {
             let total = endsAt.timeIntervalSince(session.startedAt)
             let remaining = endsAt.timeIntervalSince(now)
             if total > 0 {
-                progress = min(1, max(0, remaining / total))
+                // Whole percent, rounded up: the menu-bar image is redrawn when the lamp
+                // visibly changes, not on every one-second tick.
+                progress = min(1, max(0, (remaining / total * 100).rounded(.up) / 100))
             } else {
                 progress = 0
             }

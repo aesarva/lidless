@@ -16,6 +16,10 @@ import os
     private let backend: PrivilegedBackend
     private let markerURL: URL
     private let log = Logger(subsystem: "io.github.aesarva.Lidless", category: "helper")
+    /// This process turned disablesleep on and has not turned it off yet. The marker is the
+    /// crash-recovery record, but someone else may remove it (the watchdog, an uninstall):
+    /// what we turned on we turn off regardless.
+    private var enabledHere = false
 
     public init(backend: PrivilegedBackend, markerURL: URL = LidSleepService.defaultMarkerURL) {
         self.backend = backend
@@ -33,6 +37,7 @@ import os
         try Data("1".utf8).write(to: markerURL)
         do {
             try backend.setSleepDisabled(true)
+            enabledHere = true
         } catch {
             if !existed { try? fm.removeItem(at: markerURL) }
             throw error
@@ -41,9 +46,14 @@ import os
 
     public func disable() throws {
         let fm = FileManager.default
-        guard fm.fileExists(atPath: markerURL.path) else { return }
+        guard enabledHere || fm.fileExists(atPath: markerURL.path) else { return }
         try backend.setSleepDisabled(false)
-        try fm.removeItem(at: markerURL)
+        enabledHere = false
+        // Sleep is back to normal: a marker that is already gone (the watchdog's own reset,
+        // an overlapping recovery) is not a failure.
+        do {
+            try fm.removeItem(at: markerURL)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {}
     }
 
     @discardableResult

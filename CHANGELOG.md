@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.2.0 — 2026-10-17
+## 0.2.0 — 2026-10-21
 
-First public release.
+First public release, signed with a Developer ID and notarized.
 
 - Keep the Mac awake for 15 min, 1 h, 3 h, until a time of day, or indefinitely; editable presets.
 - Closed-lid mode: the Mac keeps running with the lid shut and the screen turns off; screens are left alone with an external display. A one-time helper install allows exactly `pmset -a disablesleep 0|1`; a root watchdog restores normal sleep if Lidless is gone.

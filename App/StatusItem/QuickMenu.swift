@@ -6,9 +6,11 @@ enum QuickMenu {
     static func build(
         controller: SessionController,
         helperInstalled: Bool,
+        helperBusy: Bool = false,
         onSettings: @escaping (SettingsTab) -> Void = { _ in }
     ) -> NSMenu {
         let menu = NSMenu()
+        menu.autoenablesItems = false
         let isActive = controller.session != nil
 
         menu.addItem(ActionItem(isActive ? String(localized: "Turn Off") : String(localized: "Turn On")) {
@@ -36,6 +38,8 @@ enum QuickMenu {
             }
         }
         lid.state = controller.settings.lidModeEnabled ? .on : .off
+        // No lid-mode changes while the helper is being installed or removed.
+        lid.isEnabled = !helperBusy
         menu.addItem(lid)
         menu.addItem(.separator())
 
