@@ -44,6 +44,8 @@ public final class SleepGuard: @unchecked Sendable {
     private let lock = NSLock()
     private var holders: Set<UUID> = []
     private var owned = false
+    /// A marker file may exist that does not mean we own disablesleep (a failed create's leftover).
+    private var staleMarker = false
 
     public init(setting: SleepSetting, store: OwnershipStore) {
         self.setting = setting
@@ -52,7 +54,7 @@ public final class SleepGuard: @unchecked Sendable {
 
     public var isIdle: Bool {
         lock.lock(); defer { lock.unlock() }
-        return holders.isEmpty && !owned
+        return holders.isEmpty && !owned && !staleMarker
     }
 
     public func acquire(_ holder: UUID) throws {
@@ -62,17 +64,26 @@ public final class SleepGuard: @unchecked Sendable {
             if try !setting.isDisabled() {
                 do {
                     try store.create()
+                } catch {
+                    // Nothing was written to pmset, so this claims no ownership. A leftover file
+                    // is only a marker to clean up (unless a pending reset already owns it).
+                    if !owned, store.exists() {
+                        do { try store.remove() } catch { staleMarker = true }
+                    }
+                    throw error
+                }
+                do {
                     try setting.setDisabled(true)
                 } catch {
-                    // create() may have left the file behind, or the write may have landed:
-                    // keep ownership until a 0 is confirmed.
+                    // The write may have landed before failing: keep ownership until a 0 is confirmed.
                     owned = true
                     try? resetIfUnheld()
                     throw error
                 }
                 owned = true
+                staleMarker = false
             } else {
-                owned = owned || store.exists()
+                owned = owned || (store.exists() && !staleMarker)
             }
         }
         holders.insert(holder)
@@ -101,6 +112,11 @@ public final class SleepGuard: @unchecked Sendable {
     /// Repeats a reset that failed earlier; does nothing unless one is pending and nobody holds.
     public func retryPendingReset() throws {
         lock.lock(); defer { lock.unlock() }
+        if staleMarker, holders.isEmpty, !owned {
+            try store.remove()
+            staleMarker = false
+            return
+        }
         try resetIfUnheld()
     }
 
@@ -109,5 +125,6 @@ public final class SleepGuard: @unchecked Sendable {
         try setting.setDisabled(false)
         try store.remove()
         owned = false
+        staleMarker = false
     }
 }

@@ -112,31 +112,48 @@ import Testing
         #expect(guardian.isIdle)
     }
 
+    @Test func createFailureWithoutFileClaimsNothing() throws {
+        let (guardian, setting, store) = make(initial: false)
+        store.failCreate = true
+        setting.failWriteOne = true
+        setting.failWriteZeroTimes = 100
+        #expect(throws: FakeSleepSettingError.self) { try guardian.acquire(a) }
+        #expect(setting.writes.isEmpty)
+        #expect(guardian.isIdle)
+        setting.value = true
+        try guardian.acquire(a)
+        try guardian.release(a)
+        #expect(setting.writes.isEmpty)
+    }
+
     @Test func createFailureLeavingFileIsCleanedUp() throws {
         let (guardian, setting, store) = make(initial: false)
         store.failCreate = true
+        store.failCreateLeavesFile = true
         #expect(throws: FakeSleepSettingError.self) { try guardian.acquire(a) }
         #expect(!store.exists())
         #expect(guardian.isIdle)
-        #expect(setting.writes == [false])
+        #expect(setting.writes.isEmpty)
     }
 
-    @Test func createFailureWithFailedCleanupStaysPending() throws {
+    @Test func staleMarkerIsNotAdoptedAndIsRetried() throws {
         let (guardian, setting, store) = make(initial: false)
         store.failCreate = true
+        store.failCreateLeavesFile = true
         store.failRemove = true
         #expect(throws: FakeSleepSettingError.self) { try guardian.acquire(a) }
         #expect(store.exists())
         #expect(!guardian.isIdle)
+        #expect(setting.writes.isEmpty)
+        setting.value = true
+        try guardian.acquire(a)
+        try guardian.release(a)
+        #expect(setting.writes.isEmpty)
         store.failRemove = false
         try guardian.retryPendingReset()
         #expect(!store.exists())
         #expect(guardian.isIdle)
-        setting.value = true
-        let before = setting.writes.count
-        try guardian.acquire(a)
-        try guardian.release(a)
-        #expect(setting.writes.count == before)
+        #expect(setting.writes.isEmpty)
     }
 
     @Test func removeFailureAfterResetStaysPending() throws {

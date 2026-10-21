@@ -164,9 +164,15 @@ final class MemoryOwnershipStore: OwnershipStore, @unchecked Sendable {
     func exists() -> Bool { lock.lock(); defer { lock.unlock() }; return _exists }
     private var _failRemove = false
     private var _failCreate = false
+    private var _failCreateLeavesFile = false
     var failRemove: Bool {
         get { lock.lock(); defer { lock.unlock() }; return _failRemove }
         set { lock.lock(); defer { lock.unlock() }; _failRemove = newValue }
+    }
+    /// With `failCreate`: the file is written before create() throws.
+    var failCreateLeavesFile: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _failCreateLeavesFile }
+        set { lock.lock(); defer { lock.unlock() }; _failCreateLeavesFile = newValue }
     }
     var failCreate: Bool {
         get { lock.lock(); defer { lock.unlock() }; return _failCreate }
@@ -175,8 +181,11 @@ final class MemoryOwnershipStore: OwnershipStore, @unchecked Sendable {
 
     func create() throws {
         lock.lock(); defer { lock.unlock() }
+        if _failCreate {
+            if _failCreateLeavesFile { _exists = true }
+            throw FakeSleepSettingError()
+        }
         _exists = true
-        if _failCreate { throw FakeSleepSettingError() }
     }
     func remove() throws {
         lock.lock(); defer { lock.unlock() }
