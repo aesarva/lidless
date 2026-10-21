@@ -24,9 +24,20 @@ public struct LegacyHelperCleaner: Sendable {
         root.appendingPathComponent(path).path
     }
 
-    private func isRealDirectory(_ path: String) -> Bool {
+    private static let markerName = "lid-mode.marker"
+
+    /// Opens the marker directory without following a symlink. The descriptor pins the
+    /// directory, so a swap for a symlink during the slow commands cannot redirect the
+    /// marker steps. nil when there is no real directory.
+    private func openMarkerDirectory() -> Int32? {
+        let fd = open(fsPath(Self.markerDirectory), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        guard fd >= 0 else { return nil }
         var st = stat()
-        return lstat(fsPath(path), &st) == 0 && (st.st_mode & S_IFMT) == S_IFDIR
+        guard fstat(fd, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else {
+            close(fd)
+            return nil
+        }
+        return fd
     }
 
     /// lstat: a dangling symlink exists.
@@ -40,30 +51,42 @@ public struct LegacyHelperCleaner: Sendable {
         Self.paths.contains(where: exists)
     }
 
-    /// Returns the absolute paths removed: the files, the marker and the marker directory
-    /// (the last only when it was a real, empty directory).
+    /// Returns the absolute paths of the files actually unlinked (the three legacy paths and
+    /// the marker). The marker directory is removed too when empty, but is not reported.
     public func clean() throws -> [String] {
-        let markerDirIsReal = isRealDirectory(Self.markerDirectory)
-        if markerDirIsReal, exists(Self.markerFile) {
+        let dirFd = openMarkerDirectory()
+        defer { if let dirFd { close(dirFd) } }
+
+        var st = stat()
+        if let dirFd, fstatat(dirFd, Self.markerName, &st, AT_SYMLINK_NOFOLLOW) == 0 {
             let result = try runner.run("/usr/bin/pmset", ["-a", "disablesleep", "0"])
             if result.exitCode != 0 { throw HelperError.commandFailed(result.stderr) }
         }
-        // Not loaded is fine.
-        _ = try? runner.run("/bin/launchctl", ["bootout", "system/app.lidless.watchdog"])
+
+        // 0 booted out, 3 / 113 not loaded. Anything else (or a timeout) aborts before deleting.
+        let boot: CommandResult
+        do {
+            boot = try runner.run("/bin/launchctl", ["bootout", "system/app.lidless.watchdog"])
+        } catch {
+            throw HelperError.commandFailed("launchctl bootout failed: \(error)")
+        }
+        guard [0, 3, 113].contains(boot.exitCode) else {
+            throw HelperError.commandFailed("launchctl bootout exited \(boot.exitCode): \(boot.stderr)")
+        }
 
         var removed: [String] = []
-        var targets = Self.paths
-        if markerDirIsReal { targets.append(Self.markerFile) }
-        for path in targets where try unlinkIfPresent(path) { removed.append(path) }
-
-        if markerDirIsReal, rmdir(fsPath(Self.markerDirectory)) == 0 {
-            removed.append(Self.markerDirectory)
+        for path in Self.paths where try fsResult(path, unlink(fsPath(path))) { removed.append(path) }
+        if let dirFd,
+           try fsResult(Self.markerFile, unlinkat(dirFd, Self.markerName, 0)) {
+            removed.append(Self.markerFile)
         }
+        if dirFd != nil { _ = rmdir(fsPath(Self.markerDirectory)) }
         return removed
     }
 
-    private func unlinkIfPresent(_ path: String) throws -> Bool {
-        if unlink(fsPath(path)) == 0 { return true }
+    /// true when the call removed the entry, false for ENOENT, throws otherwise.
+    private func fsResult(_ path: String, _ rc: Int32) throws -> Bool {
+        if rc == 0 { return true }
         let code = errno
         if code == ENOENT { return false }
         throw HelperError.commandFailed("cannot remove \(path): \(String(cString: strerror(code)))")

@@ -33,9 +33,9 @@ import Testing
         for p in LegacyHelperCleaner.paths + [marker] { try touch(root, p) }
         let runner = FakeCommandRunner()
         let removed = try LegacyHelperCleaner(root: root, runner: runner).clean()
-        // Contract: the three files, the marker and the marker directory (when removed).
-        #expect(Set(removed) == Set(LegacyHelperCleaner.paths + [marker, LegacyHelperCleaner.markerDirectory]))
-        #expect(removed.count == 5)
+        // Contract: only files actually unlinked; the directory is removed but not reported.
+        #expect(Set(removed) == Set(LegacyHelperCleaner.paths + [marker]))
+        #expect(removed.count == 4)
         for p in LegacyHelperCleaner.paths + [marker, LegacyHelperCleaner.markerDirectory] {
             #expect(!exists(root, p))
         }
@@ -119,5 +119,105 @@ import Testing
         #expect(!cleaner.isPresent())
         try touch(root, LegacyHelperCleaner.paths[0])
         #expect(cleaner.isPresent())
+    }
+
+    private final class HookRunner: CommandRunner, @unchecked Sendable {
+        let onRun: @Sendable (String) throws -> CommandResult
+        init(_ onRun: @escaping @Sendable (String) throws -> CommandResult) { self.onRun = onRun }
+        func run(_ executable: String, _ arguments: [String], timeout: TimeInterval?) throws -> CommandResult {
+            try onRun(executable)
+        }
+    }
+
+    private let ok = CommandResult(exitCode: 0, stdout: "", stderr: "")
+
+    @Test func launchctlOtherExitCodeThrowsBeforeDeleting() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        for p in LegacyHelperCleaner.paths + [marker] { try touch(root, p) }
+        let runner = FakeCommandRunner()
+        runner.setResponse(bootout.joined(separator: " "), CommandResult(exitCode: 5, stdout: "", stderr: "boom"))
+        #expect(throws: HelperError.self) { try LegacyHelperCleaner(root: root, runner: runner).clean() }
+        for p in LegacyHelperCleaner.paths + [marker] { #expect(exists(root, p)) }
+    }
+
+    @Test func launchctlRunnerErrorThrowsBeforeDeleting() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        for p in LegacyHelperCleaner.paths { try touch(root, p) }
+        let runner = HookRunner { _ in throw CommandError.timedOut("launchctl") }
+        #expect(throws: HelperError.self) { try LegacyHelperCleaner(root: root, runner: runner).clean() }
+        for p in LegacyHelperCleaner.paths { #expect(exists(root, p)) }
+    }
+
+    @Test func launchctl113IsOk() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try touch(root, LegacyHelperCleaner.paths[0])
+        let runner = FakeCommandRunner()
+        runner.setResponse(bootout.joined(separator: " "), CommandResult(exitCode: 113, stdout: "", stderr: ""))
+        #expect(try LegacyHelperCleaner(root: root, runner: runner).clean().count == 1)
+    }
+
+    @Test func directorySwappedForSymlinkDuringCommandsIsHarmless() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try touch(root, marker)
+        try touch(root, "elsewhere/lid-mode.marker")
+        let dir = root.appendingPathComponent("Users/Shared/Lidless")
+        let moved = root.appendingPathComponent("Users/Shared/Moved")
+        let target = root.appendingPathComponent("elsewhere")
+        let runner = HookRunner { exe in
+            if exe == "/bin/launchctl" {
+                try FileManager.default.moveItem(at: dir, to: moved)
+                try FileManager.default.createSymbolicLink(at: dir, withDestinationURL: target)
+            }
+            return self.ok
+        }
+        _ = try LegacyHelperCleaner(root: root, runner: runner).clean()
+        #expect(exists(root, "elsewhere/lid-mode.marker"))
+        #expect(exists(root, LegacyHelperCleaner.markerDirectory))
+    }
+
+    @Test func symlinkAtLegacyPathIsUnlinkedTargetSurvives() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try touch(root, "real.txt")
+        let p = LegacyHelperCleaner.paths[0]
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(p).deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent(p), withDestinationURL: root.appendingPathComponent("real.txt"))
+        let removed = try LegacyHelperCleaner(root: root, runner: FakeCommandRunner()).clean()
+        #expect(removed == [p])
+        #expect(!exists(root, p))
+        #expect(exists(root, "real.txt"))
+    }
+
+    @Test func danglingSymlinkIsPresentAndRemoved() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let p = LegacyHelperCleaner.paths[0]
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(p).deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent(p), withDestinationURL: root.appendingPathComponent("nowhere"))
+        let cleaner = LegacyHelperCleaner(root: root, runner: FakeCommandRunner())
+        #expect(cleaner.isPresent())
+        #expect(try cleaner.clean() == [p])
+        #expect(!cleaner.isPresent())
+    }
+
+    @Test func symlinkedMarkerFileIsUnlinkedTargetSurvives() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try touch(root, "real.txt")
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(LegacyHelperCleaner.markerDirectory), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent(marker), withDestinationURL: root.appendingPathComponent("real.txt"))
+        let removed = try LegacyHelperCleaner(root: root, runner: FakeCommandRunner()).clean()
+        #expect(removed == [marker])
+        #expect(exists(root, "real.txt"))
     }
 }
