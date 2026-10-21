@@ -23,6 +23,6 @@ app:
 
 # DMG without Developer ID: make dmg VERSION=0.1.0 → dist/Lidless-0.1.0.dmg.
 # Signed + notarized release: scripts/release.sh <version>.
-VERSION ?= 0.2.0
+VERSION ?= 0.3.0
 dmg:
 	scripts/release.sh $(VERSION) --unsigned

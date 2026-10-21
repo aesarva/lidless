@@ -34,7 +34,7 @@ Update `CHANGELOG.md`, the version in `project.yml` (`MARKETING_VERSION`) and th
 
 ## Before merging
 
-- `make test` passes (Swift tests, shellcheck, watchdog script tests).
+- `make test` passes (Swift tests, shellcheck, helper plist lint).
 - `make build` succeeds without new warnings.
 - New user-visible text has a Russian translation in `App/Resources/Localizable.xcstrings`.
 - UI changes follow [DESIGN.md](DESIGN.md).
