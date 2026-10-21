@@ -73,11 +73,81 @@ import Testing
         #expect(store.exists())
     }
 
-    @Test func writeOneFailureRemovesFile() throws {
+    @Test func writeOneFailureRollsBack() throws {
         let (guardian, setting, store) = make(initial: false)
         setting.failWriteOne = true
         #expect(throws: FakeSleepSettingError.self) { try guardian.acquire(a) }
+        #expect(setting.fileExistedAtAttempt.first == true)
         #expect(!store.exists())
+        #expect(guardian.isIdle)
+        #expect(setting.writes == [false])
+    }
+
+    @Test func writeOneFailureWithFailedRollbackKeepsFile() throws {
+        let (guardian, setting, store) = make(initial: false)
+        setting.failWriteOne = true
+        setting.failWriteZeroTimes = 1
+        #expect(throws: FakeSleepSettingError.self) { try guardian.acquire(a) }
+        #expect(store.exists())
+        #expect(!guardian.isIdle)
+        try guardian.retryPendingReset()
+        #expect(setting.writes.last == false)
+        #expect(!store.exists())
+        #expect(guardian.isIdle)
+    }
+
+    @Test func removeFailureAfterResetStaysPending() throws {
+        let (guardian, setting, store) = make(initial: false)
+        try guardian.acquire(a)
+        store.failRemove = true
+        #expect(throws: FakeSleepSettingError.self) { try guardian.release(a) }
+        #expect(!guardian.isIdle)
+        store.failRemove = false
+        try guardian.acquire(b)
+        #expect(setting.writes.last == true)
+        #expect(setting.value)
+    }
+
+    @Test func failedRecoverAtStartKeepsOwnership() throws {
+        let (guardian, setting, store) = make(initial: true, file: true)
+        setting.failWriteZeroTimes = 1
+        #expect(throws: FakeSleepSettingError.self) { try guardian.recoverAtStart() }
+        #expect(!guardian.isIdle)
+        try guardian.releaseAll()
+        #expect(!store.exists())
+        #expect(guardian.isIdle)
+    }
+
+    @Test func staleFileWithFailedCleanupIsNotAdoptedAsForeign() throws {
+        let (guardian, setting, store) = make(initial: false)
+        setting.failWriteOne = true
+        store.failRemove = true
+        #expect(throws: FakeSleepSettingError.self) { try guardian.acquire(a) }
+        #expect(!guardian.isIdle)
+        store.failRemove = false
+        setting.failWriteOne = false
+        try guardian.retryPendingReset()
+        #expect(!store.exists())
+        #expect(guardian.isIdle)
+        setting.value = true
+        let before = setting.writes.count
+        try guardian.acquire(a)
+        try guardian.release(a)
+        #expect(setting.writes.count == before)
+    }
+
+    @Test func retryPendingResetIsNoopWithHolders() throws {
+        let (guardian, setting, store) = make(initial: false)
+        try guardian.acquire(a)
+        try guardian.retryPendingReset()
+        #expect(setting.writes == [true])
+        #expect(store.exists())
+    }
+
+    @Test func retryPendingResetIsNoopWhenIdle() throws {
+        let (guardian, setting, _) = make(initial: true)
+        try guardian.retryPendingReset()
+        #expect(setting.writes.isEmpty)
         #expect(guardian.isIdle)
     }
 
@@ -117,11 +187,12 @@ import Testing
     }
 
     @Test func releaseAllDropsEveryHolder() throws {
-        let (guardian, setting, _) = make(initial: false)
+        let (guardian, setting, store) = make(initial: false)
         try guardian.acquire(a)
         try guardian.acquire(b)
         try guardian.releaseAll()
         #expect(setting.writes == [true, false])
+        #expect(!store.exists())
         #expect(guardian.isIdle)
     }
 

@@ -21,9 +21,9 @@ public struct FileOwnershipStore: OwnershipStore {
         try fm.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o755])
-        guard fm.createFile(atPath: url.path, contents: Data(), attributes: [.posixPermissions: 0o644]) else {
-            throw CocoaError(.fileWriteUnknown)
-        }
+        // Data.write throws the underlying Cocoa/POSIX error, which names the path and the reason.
+        try Data().write(to: url)
+        try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
     }
 
     public func remove() throws {
@@ -57,18 +57,21 @@ public final class SleepGuard: @unchecked Sendable {
 
     public func acquire(_ holder: UUID) throws {
         lock.lock(); defer { lock.unlock() }
-        if holders.isEmpty && !owned {
+        if holders.isEmpty {
+            // Read the real value even when `owned`: a failed earlier reset may have left it at 0.
             if try !setting.isDisabled() {
                 try store.create()
                 do {
                     try setting.setDisabled(true)
                 } catch {
-                    try? store.remove()
+                    // The write may have landed before failing: keep ownership until a 0 is confirmed.
+                    owned = true
+                    try? resetIfUnheld()
                     throw error
                 }
                 owned = true
-            } else if store.exists() {
-                owned = true
+            } else {
+                owned = owned || store.exists()
             }
         }
         holders.insert(holder)
@@ -86,12 +89,18 @@ public final class SleepGuard: @unchecked Sendable {
         try resetIfUnheld()
     }
 
+    /// Call only at daemon start, before accepting connections.
     public func recoverAtStart() throws {
         lock.lock(); defer { lock.unlock() }
         guard store.exists() else { return }
-        try setting.setDisabled(false)
-        try store.remove()
-        owned = false
+        owned = true
+        try resetIfUnheld()
+    }
+
+    /// Repeats a reset that failed earlier; does nothing unless one is pending and nobody holds.
+    public func retryPendingReset() throws {
+        lock.lock(); defer { lock.unlock() }
+        try resetIfUnheld()
     }
 
     private func resetIfUnheld() throws {

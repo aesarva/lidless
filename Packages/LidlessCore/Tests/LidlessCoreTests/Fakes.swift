@@ -162,8 +162,27 @@ final class MemoryOwnershipStore: OwnershipStore, @unchecked Sendable {
     init(exists: Bool = false) { _exists = exists }
 
     func exists() -> Bool { lock.lock(); defer { lock.unlock() }; return _exists }
-    func create() throws { lock.lock(); defer { lock.unlock() }; _exists = true }
-    func remove() throws { lock.lock(); defer { lock.unlock() }; _exists = false }
+    private var _failRemove = false
+    private var _failCreate = false
+    var failRemove: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _failRemove }
+        set { lock.lock(); defer { lock.unlock() }; _failRemove = newValue }
+    }
+    var failCreate: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _failCreate }
+        set { lock.lock(); defer { lock.unlock() }; _failCreate = newValue }
+    }
+
+    func create() throws {
+        lock.lock(); defer { lock.unlock() }
+        if _failCreate { throw FakeSleepSettingError() }
+        _exists = true
+    }
+    func remove() throws {
+        lock.lock(); defer { lock.unlock() }
+        if _failRemove { throw FakeSleepSettingError() }
+        _exists = false
+    }
 }
 
 struct FakeSleepSettingError: Error, Equatable {}
@@ -175,12 +194,18 @@ final class FakeSleepSetting: SleepSetting, @unchecked Sendable {
     private var _value: Bool
     private var _writes: [Bool] = []
     private var _fileExistedAtWrite: [Bool] = []
+    private var _fileExistedAtAttempt: [Bool] = []
     private var _failRead = false
     private var _failWriteOne = false
     private var _failWriteZeroTimes = 0
 
     init(initial: Bool, store: MemoryOwnershipStore) { _value = initial; self.store = store }
 
+    var fileExistedAtAttempt: [Bool] { lock.lock(); defer { lock.unlock() }; return _fileExistedAtAttempt }
+    var value: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _value }
+        set { lock.lock(); defer { lock.unlock() }; _value = newValue }
+    }
     var writes: [Bool] { lock.lock(); defer { lock.unlock() }; return _writes }
     var fileExistedAtWrite: [Bool] { lock.lock(); defer { lock.unlock() }; return _fileExistedAtWrite }
     var failRead: Bool {
@@ -204,6 +229,7 @@ final class FakeSleepSetting: SleepSetting, @unchecked Sendable {
 
     func setDisabled(_ disabled: Bool) throws {
         lock.lock(); defer { lock.unlock() }
+        _fileExistedAtAttempt.append(store.exists())
         if disabled, _failWriteOne { throw FakeSleepSettingError() }
         if !disabled, _failWriteZeroTimes > 0 { _failWriteZeroTimes -= 1; throw FakeSleepSettingError() }
         _value = disabled
