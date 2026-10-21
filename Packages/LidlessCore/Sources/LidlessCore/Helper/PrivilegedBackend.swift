@@ -39,7 +39,8 @@ public protocol PrivilegedBackend: Sendable {
     func refreshInfo()
     func install() throws
     func uninstall() throws
-    func setSleepDisabled(_ disabled: Bool) throws
+    /// Returns the generation of the daemon connection that carried the call (see `HelperClient`).
+    @discardableResult func setSleepDisabled(_ disabled: Bool) throws -> UInt64
     func isSleepDisabled() throws -> Bool
     /// Whether any file of the 0.2.0 sudoers helper is still installed.
     func legacyHelperPresent() -> Bool

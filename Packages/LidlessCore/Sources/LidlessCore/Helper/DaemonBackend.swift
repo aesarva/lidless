@@ -22,6 +22,8 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     private var reregistered = false
     /// The user removed the helper: no automatic re-registration until the next `install()`.
     private var userRemoved = false
+    /// Bumped by install() and uninstall(): a refresh that began before one does not report.
+    private var registrationGeneration: UInt64 = 0
     /// Held across every registration change (install, uninstall, unregister + register), so a
     /// background re-registration can never undo the user's uninstall.
     private let mutationLock = NSLock()
@@ -35,9 +37,9 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         self.verifyDelay = verifyDelay
     }
 
-    /// Fires after the connection to the daemon dropped (timeout, idle exit, crash): whatever
-    /// the daemon held for this app is released, so re-check and re-apply.
-    public var onConnectionLost: (@Sendable () -> Void)? {
+    /// Fires with a connection's generation after it dropped (timeout, idle exit, crash): what
+    /// the daemon held for that connection is released, so re-check and re-apply.
+    public var onConnectionLost: (@Sendable (UInt64) -> Void)? {
         get { client?.onConnectionLost }
         set { client?.onConnectionLost = newValue }
     }
@@ -54,6 +56,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     }
 
     public func refreshInfo() {
+        let startedIn = lock.withLock { registrationGeneration }
         guard let client, registration.status == .enabled else { return }
         let problem: String?
         switch check(client) {
@@ -61,9 +64,12 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         case .failed(let message): problem = message
         case .mismatch(let message): problem = reregister(client, because: message)
         }
-        if let problem { log.error("helper: \(problem, privacy: .public)") }
-        // Shown only while registered; install() and uninstall() clear it.
-        lock.withLock { infoError = problem }
+        lock.withLock {
+            // The user installed or removed the helper meanwhile: this is about the old one.
+            guard registrationGeneration == startedIn else { return }
+            if let problem { log.error("helper: \(problem, privacy: .public)") }
+            infoError = problem
+        }
     }
 
     private enum Check {
@@ -124,6 +130,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         lock.withLock {
             infoError = nil
             userRemoved = false
+            registrationGeneration += 1
         }
         do {
             try registration.register()
@@ -143,6 +150,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         lock.withLock {
             infoError = nil
             userRemoved = true
+            registrationGeneration += 1
         }
         guard registration.status != .notRegistered else { return }
         do {
@@ -152,7 +160,8 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         }
     }
 
-    public func setSleepDisabled(_ disabled: Bool) throws {
+    @discardableResult
+    public func setSleepDisabled(_ disabled: Bool) throws -> UInt64 {
         try withClient { try $0.setSleepDisabled(disabled) }
     }
 

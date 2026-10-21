@@ -222,12 +222,13 @@ import os
         attemptRecovery()
     }
 
-    /// Call when the connection to the daemon dropped: the daemon has let go of this app's
-    /// `disablesleep`. Active closed-lid mode is applied again unless the safety rules would
+    /// Call when the daemon connection of `generation` dropped. If that ended this app's hold
+    /// on `disablesleep`, active closed-lid mode is applied again unless the safety rules would
     /// suspend it (then it is suspended for that reason). If re-applying fails, lid mode is
-    /// suspended as `.helperUnavailable` and the next readings retry it.
-    public func helperConnectionLost() {
-        lid.connectionLost()
+    /// suspended as `.helperUnavailable` and the next readings retry it. A late report about
+    /// an older connection (lid mode re-acquired since) is ignored.
+    public func helperConnectionLost(generation: UInt64) {
+        guard lid.connectionLost(generation: generation) else { return }
         guard let s = session, s.lidModeActive else { return }
         guard settings.lidModeEnabled else {
             // A failed disable left lid mode marked active: the daemon has now done it.
@@ -306,13 +307,16 @@ import os
     }
 
     /// `keepingStart`: automatic recovery keeps `lidModeEnabledAt`, so the battery time limit
-    /// is not restarted; only the user's own enable restarts it.
+    /// is not restarted. The user's own enable starts a new interval, even if it fails, so the
+    /// automatic retry after it is judged by the new interval.
     @discardableResult
     private func enableLidMode(keepingStart: Bool = false) -> Bool {
+        mutateSession {
+            if !keepingStart || $0.lidModeEnabledAt == nil { $0.lidModeEnabledAt = clock.now }
+        }
         do {
             try lid.enable()
             mutateSession {
-                if !keepingStart || $0.lidModeEnabledAt == nil { $0.lidModeEnabledAt = clock.now }
                 $0.lidModeActive = true
                 $0.lidModeSuspendedReason = nil
             }

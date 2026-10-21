@@ -25,7 +25,7 @@ import LidlessCore
     func enable() throws {}
     func disable() throws {}
     func recoverIfNeeded() -> Bool { true }
-    func connectionLost() {}
+    func connectionLost(generation: UInt64) -> Bool { false }
 }
 
 final class PreviewBackend: PrivilegedBackend {
@@ -35,7 +35,7 @@ final class PreviewBackend: PrivilegedBackend {
     func refreshInfo() {}
     func install() throws {}
     func uninstall() throws {}
-    func setSleepDisabled(_ disabled: Bool) throws {}
+    func setSleepDisabled(_ disabled: Bool) throws -> UInt64 { 0 }
     func isSleepDisabled() throws -> Bool { false }
     func legacyHelperPresent() -> Bool { false }
     func removeLegacyHelper() throws -> [String] { [] }

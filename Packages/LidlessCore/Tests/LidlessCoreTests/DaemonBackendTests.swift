@@ -97,7 +97,8 @@ private func makeBackend(
     @Test func setSleepDisabledPassesThrough() throws {
         let client = FakeHelperClient()
         let (backend, _) = makeBackend(client: client)
-        try backend.setSleepDisabled(true)
+        client.generation = 7
+        #expect(try backend.setSleepDisabled(true) == 7)
         try backend.setSleepDisabled(false)
         #expect(client.setCalls == [true, false])
 
@@ -218,6 +219,37 @@ private func makeBackend(
         #expect(registration.registerCalls == 2)
     }
 
+    /// A verification that began before an uninstall + install must not report on the new
+    /// registration.
+    @Test func staleVerificationDoesNotOverwriteAfterReinstall() throws {
+        let client = FakeHelperClient()
+        client.stubInfo = HelperInfo(version: "0.2.9", sleepDisabled: false)
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        let calls = Counter()
+        let started = DispatchSemaphore(value: 0)
+        let gate = DispatchSemaphore(value: 0)
+        client.onInfo = {
+            calls.increment()
+            // The first check of the replacement pauses.
+            if calls.value == 2 {
+                started.signal()
+                gate.wait()
+            }
+        }
+        let refreshed = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            backend.refreshInfo()
+            refreshed.signal()
+        }
+        started.wait()
+        try backend.uninstall()
+        try backend.install()
+        gate.signal()
+        refreshed.wait()
+        #expect(registration.stubStatus == .enabled)
+        #expect(backend.status() == .installed)
+    }
+
     @Test func unsignedNeverTouchesRegistration() {
         let (backend, registration) = makeBackend(.notRegistered, client: nil)
         if case .installFailed = thrown({ try backend.install() }) {} else {
@@ -251,8 +283,10 @@ private func makeBackend(
         #expect(registration.openSettingsCalls == 1)
 
         let fired = Counter()
-        backend.onConnectionLost = { fired.increment() }
-        client.onConnectionLost?()
+        backend.onConnectionLost = { generation in
+            if generation == 3 { fired.increment() }
+        }
+        client.onConnectionLost?(3)
         #expect(fired.value == 1)
     }
 }

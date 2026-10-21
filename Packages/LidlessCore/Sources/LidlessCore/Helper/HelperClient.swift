@@ -11,14 +11,18 @@ public struct HelperInfo: Equatable, Sendable {
 }
 
 /// Synchronous calls to the privileged daemon. Errors are `HelperError.commandFailed`.
+/// Connections are numbered (generations, increasing from 1): the daemon ties a hold to the
+/// connection that took it and releases it when that connection closes.
 public protocol HelperClient: AnyObject, Sendable {
-    func setSleepDisabled(_ disabled: Bool) throws
+    /// Returns the generation of the connection that carried the call.
+    @discardableResult func setSleepDisabled(_ disabled: Bool) throws -> UInt64
     func info() throws -> HelperInfo
     /// Returns the removed paths.
     func removeLegacyHelper() throws -> [String]
-    /// Called after the connection is dropped (timeout, daemon idle exit, crash or rejection);
-    /// the next call opens a new one. A cue to re-check state, not an error by itself.
-    var onConnectionLost: (@Sendable () -> Void)? { get set }
+    /// Called with the generation of a connection after it was dropped (timeout, daemon idle
+    /// exit, crash or rejection); the next call opens a new one. A cue to re-check state, not
+    /// an error by itself. Delivered asynchronously, so it can arrive after newer calls.
+    var onConnectionLost: (@Sendable (UInt64) -> Void)? { get set }
 }
 
 /// `HelperClient` over one lazy `NSXPCConnection` to the daemon's Mach service.
@@ -28,8 +32,8 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
     private let lock = NSLock()
     private var connection: NSXPCConnection?
     /// Tells a stale connection's handlers apart from the current connection's.
-    private var generation = 0
-    private var lostHandler: (@Sendable () -> Void)?
+    private var generation: UInt64 = 0
+    private var lostHandler: (@Sendable (UInt64) -> Void)?
 
     /// `requirement` is the code-signing requirement the daemon must satisfy.
     public convenience init(requirement: String, timeout: TimeInterval = 5) {
@@ -51,16 +55,18 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
         connection?.invalidate()
     }
 
-    public var onConnectionLost: (@Sendable () -> Void)? {
+    public var onConnectionLost: (@Sendable (UInt64) -> Void)? {
         get { lock.withLock { lostHandler } }
         set { lock.withLock { lostHandler = newValue } }
     }
 
-    public func setSleepDisabled(_ disabled: Bool) throws {
-        let error: String? = try call { helper, reply in
+    @discardableResult
+    public func setSleepDisabled(_ disabled: Bool) throws -> UInt64 {
+        let (error, generation): (String?, UInt64) = try callReportingGeneration { helper, reply in
             helper.setSleepDisabled(disabled) { reply($0) }
         }
         if let error { throw HelperError.commandFailed(error) }
+        return generation
     }
 
     public func info() throws -> HelperInfo {
@@ -83,7 +89,7 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
 
     // MARK: - Connection
 
-    private func currentConnection() -> (NSXPCConnection, Int) {
+    private func currentConnection() -> (NSXPCConnection, UInt64) {
         lock.withLock {
             if let connection { return (connection, generation) }
             generation += 1
@@ -102,8 +108,8 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
     /// Clears the connection of `expected` generation, invalidates it and reports the loss once.
     /// The report is asynchronous: a handler that calls the client again must not hold up
     /// (or nest its own timeout inside) the call that is returning the timeout error.
-    private func drop(_ expected: Int) {
-        let dropped: (NSXPCConnection, (@Sendable () -> Void)?)? = lock.withLock {
+    private func drop(_ expected: UInt64) {
+        let dropped: (NSXPCConnection, (@Sendable (UInt64) -> Void)?)? = lock.withLock {
             guard generation == expected, let c = connection else { return nil }
             connection = nil
             return (c, lostHandler)
@@ -111,7 +117,7 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
         guard let (c, handler) = dropped else { return }
         // Its own invalidation handler then finds a newer (or no) generation and does nothing.
         c.invalidate()
-        if let handler { DispatchQueue.global().async(execute: handler) }
+        if let handler { DispatchQueue.global().async { handler(expected) } }
     }
 
     /// Sends one message and waits up to `timeout` for its reply.
@@ -123,6 +129,13 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
     private func call<T: Sendable>(
         _ send: @escaping @Sendable (HelperProtocol, @escaping @Sendable (T) -> Void) -> Void
     ) throws -> T {
+        try callReportingGeneration(send).0
+    }
+
+    /// `call` that also returns the generation of the connection that carried it.
+    private func callReportingGeneration<T: Sendable>(
+        _ send: @escaping @Sendable (HelperProtocol, @escaping @Sendable (T) -> Void) -> Void
+    ) throws -> (T, UInt64) {
         let (connection, current) = currentConnection()
         // NSXPCConnection is thread-safe, just not annotated Sendable.
         nonisolated(unsafe) let c = connection
@@ -148,7 +161,7 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
             drop(current)
         }
         guard let result = outcome.result else { throw HelperError.commandFailed("no reply") }
-        return try result.get()
+        return (try result.get(), current)
     }
 }
 

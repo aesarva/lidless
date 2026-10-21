@@ -250,21 +250,21 @@ struct SessionControllerSafetyTests {
     @Test func connectionLostReenablesLidMode() {
         startWithLid()
         clock.advance(60)
-        c.helperConnectionLost()
+        c.helperConnectionLost(generation: 1)
         #expect(lid.enableCalls == 2)
         #expect(c.session?.lidModeActive == true)
         // The battery time limit keeps counting from the original enable.
         #expect(c.session?.lidModeEnabledAt == t0)
         #expect(notifier.posted.isEmpty)
         #expect(c.attention == nil)
-        #expect(lid.connectionLostCalls == 1)
+        #expect(lid.lostGenerations == [1])
     }
 
     @Test func connectionLostAndReenableFailsSuspendsOnce() {
         startWithLid()
         lid.failEnable = true
-        c.helperConnectionLost()
-        c.helperConnectionLost()
+        c.helperConnectionLost(generation: 1)
+        c.helperConnectionLost(generation: 1)
         #expect(lid.enableCalls == 2)
         #expect(c.session?.lidModeActive == false)
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
@@ -276,7 +276,7 @@ struct SessionControllerSafetyTests {
     @Test func pollRetriesHelperSuspendedLidMode() {
         startWithLid()
         lid.failEnable = true
-        c.helperConnectionLost()
+        c.helperConnectionLost(generation: 1)
         c.update(readings: readings())
         #expect(c.session?.lidModeActive == false)
         #expect(helperUnavailablePosts() == 1)
@@ -294,7 +294,7 @@ struct SessionControllerSafetyTests {
     @Test func pollRetryTurnsIntoSafetySuspension() {
         startWithLid()
         lid.failEnable = true
-        c.helperConnectionLost()
+        c.helperConnectionLost(generation: 1)
         lid.failEnable = false
         let before = lid.enableCalls
         c.update(readings: readings(thermal: .serious))
@@ -310,7 +310,7 @@ struct SessionControllerSafetyTests {
     @Test func recoveryAfterBatteryLimitStaysSuspended() {
         startWithLid()
         lid.failEnable = true
-        c.helperConnectionLost()
+        c.helperConnectionLost(generation: 1)
         lid.failEnable = false
         clock.advance(240 * 60)
         c.update(readings: readings(onBattery: true, lidClosed: true, since: t0))
@@ -324,7 +324,7 @@ struct SessionControllerSafetyTests {
         lid.failDisable = true
         c.update(readings: readings(thermal: .serious))
         #expect(c.session?.lidModeActive == true)
-        c.helperConnectionLost()
+        c.helperConnectionLost(generation: 1)
         #expect(lid.enableCalls == 1)
         #expect(c.session?.lidModeActive == false)
         #expect(c.session?.lidModeSuspendedReason == .thermal)
@@ -364,11 +364,64 @@ struct SessionControllerSafetyTests {
         #expect(c.session?.lidModeActive == true)
     }
 
+    /// Loss of an older connection reported after lid mode was re-acquired on a newer one:
+    /// ignored, and the hold is still released later.
+    @Test func staleConnectionLossAfterReacquireIsIgnored() {
+        let backend = FakeBackend()
+        let service = LidSleepService(backend: backend)
+        let c = SessionController(assertions: assertions, lid: service, notifier: notifier,
+                                  settingsStore: store, clock: clock)
+        c.settings.lidModeEnabled = true
+        c.start(.indefinite)
+        backend.generation = 2
+        c.setLidMode(false)
+        c.setLidMode(true)
+        #expect(backend.setCalls == [true, false, true])
+
+        c.helperConnectionLost(generation: 1)
+        #expect(backend.setCalls == [true, false, true])
+        #expect(c.session?.lidModeActive == true)
+
+        c.update(readings: readings(thermal: .serious))
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        #expect(backend.setCalls == [true, false, true, false])
+    }
+
+    @Test func connectionLossThatDoesNotAffectTheHoldIsIgnored() {
+        startWithLid()
+        lid.lossAffectsHold = false
+        lid.failEnable = true
+        c.helperConnectionLost(generation: 1)
+        #expect(lid.enableCalls == 1)
+        #expect(c.session?.lidModeActive == true)
+        #expect(notifier.posted.isEmpty)
+    }
+
+    /// The user's own enable starts a new battery-limit interval even when it fails, so the
+    /// automatic retry after it is not suspended at once by the old interval.
+    @Test func explicitEnableStartsANewIntervalEvenWhenItFails() {
+        startWithLid()
+        clock.advance(240 * 60)
+        c.update(readings: readings(onBattery: true, lidClosed: true, since: t0))
+        #expect(c.session?.lidModeSuspendedReason == .lidOnBatteryLimit)
+
+        lid.failEnable = true
+        c.setLidMode(true)
+        #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+        #expect(c.session?.lidModeEnabledAt == clock.now)
+
+        lid.failEnable = false
+        clock.advance(15)
+        c.update(readings: readings(onBattery: true, lidClosed: true, since: t0))
+        #expect(c.session?.lidModeActive == true)
+        #expect(c.session?.lidModeSuspendedReason == nil)
+    }
+
     @Test func connectionLostWithoutLidModeDoesNothing() {
-        c.helperConnectionLost()
+        c.helperConnectionLost(generation: 1)
         #expect(lid.enableCalls == 0)
         c.start(.indefinite)
-        c.helperConnectionLost()
+        c.helperConnectionLost(generation: 1)
         #expect(lid.enableCalls == 0)
         #expect(notifier.posted.isEmpty)
     }
@@ -381,9 +434,9 @@ struct SessionControllerSafetyTests {
         c.setLidMode(false)
         #expect(c.session?.lidModeActive == true)
         #expect(c.attention == .helperUnavailable)
-        c.helperConnectionLost()
+        c.helperConnectionLost(generation: 1)
         #expect(lid.enableCalls == 1)
-        #expect(lid.connectionLostCalls == 1)
+        #expect(lid.lostGenerations == [1])
         #expect(c.session?.lidModeActive == false)
         #expect(c.session?.lidModeSuspendedReason == nil)
         #expect(c.attention == nil)

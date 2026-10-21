@@ -55,8 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             display: SystemDisplayControl()
         )
         self.controller = controller
-        backend.onConnectionLost = { [weak controller] in
-            Task { @MainActor in controller?.helperConnectionLost() }
+        backend.onConnectionLost = { [weak controller] generation in
+            Task { @MainActor in controller?.helperConnectionLost(generation: generation) }
         }
         notifier.safetySettings = { [weak controller] in controller?.settings.safety ?? SafetySettings() }
         notifier.onExtend = { [weak controller] minutes in controller?.extend(byMinutes: minutes) }

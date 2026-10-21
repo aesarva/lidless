@@ -39,6 +39,13 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
     private var _status: HelperStatus = .installed
     private var _failNextSet: HelperError?
     private var _setCalls: [Bool] = []
+    private var _generation: UInt64 = 1
+
+    /// The connection generation `setSleepDisabled` reports.
+    var generation: UInt64 {
+        get { lock.withLock { _generation } }
+        set { lock.withLock { _generation = newValue } }
+    }
 
     var stubStatus: HelperStatus {
         get { lock.lock(); defer { lock.unlock() }; return _status }
@@ -57,13 +64,15 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
     func legacyHelperPresent() -> Bool { false }
     func removeLegacyHelper() throws -> [String] { [] }
     func openSystemSettings() {}
-    func setSleepDisabled(_ disabled: Bool) throws {
+    func setSleepDisabled(_ disabled: Bool) throws -> UInt64 {
         lock.lock()
         _setCalls.append(disabled)
         let failure = _failNextSet
         _failNextSet = nil
+        let generation = _generation
         lock.unlock()
         if let failure { throw failure }
+        return generation
     }
     func isSleepDisabled() throws -> Bool { lock.lock(); defer { lock.unlock() }; return _setCalls.last ?? false }
 }
@@ -132,7 +141,8 @@ final class FakeHelperClient: HelperClient, @unchecked Sendable {
     private var _setCalls: [Bool] = []
     private var _infoCalls = 0
     private var _removeLegacyResult: Result<[String], HelperError> = .success([])
-    private var _lostHandler: (@Sendable () -> Void)?
+    private var _lostHandler: (@Sendable (UInt64) -> Void)?
+    private var _generation: UInt64 = 1
     private var _infoScript: [Result<HelperInfo, HelperError>] = []
     private var _onInfo: (@Sendable () -> Void)?
 
@@ -166,15 +176,20 @@ final class FakeHelperClient: HelperClient, @unchecked Sendable {
     var setCalls: [Bool] { lock.withLock { _setCalls } }
     var infoCalls: Int { lock.withLock { _infoCalls } }
 
-    var onConnectionLost: (@Sendable () -> Void)? {
+    var onConnectionLost: (@Sendable (UInt64) -> Void)? {
         get { lock.withLock { _lostHandler } }
         set { lock.withLock { _lostHandler = newValue } }
     }
+    var generation: UInt64 {
+        get { lock.withLock { _generation } }
+        set { lock.withLock { _generation = newValue } }
+    }
 
-    func setSleepDisabled(_ disabled: Bool) throws {
+    func setSleepDisabled(_ disabled: Bool) throws -> UInt64 {
         lock.lock(); defer { lock.unlock() }
         _setCalls.append(disabled)
         if let _setError { throw _setError }
+        return _generation
     }
 
     func info() throws -> HelperInfo {
@@ -229,7 +244,9 @@ struct FakeError: Error {}
     var enableCalls = 0
     var disableCalls = 0
     var recoverCalls = 0
-    var connectionLostCalls = 0
+    var lostGenerations: [UInt64] = []
+    /// What `connectionLost(generation:)` answers: whether the loss ended the current hold.
+    var lossAffectsHold = true
     var failEnable = false
     var failDisable = false
     var failRecover = false
@@ -247,7 +264,10 @@ struct FakeError: Error {}
         recoverCalls += 1
         return !failRecover
     }
-    func connectionLost() { connectionLostCalls += 1 }
+    func connectionLost(generation: UInt64) -> Bool {
+        lostGenerations.append(generation)
+        return lossAffectsHold
+    }
 }
 
 @MainActor final class FakePower: PowerMonitoring {

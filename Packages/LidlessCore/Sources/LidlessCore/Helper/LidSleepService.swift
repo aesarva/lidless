@@ -7,14 +7,17 @@ import Foundation
     /// Undoes a `disablesleep 1` left behind by an earlier run. Returns false when that failed
     /// (disablesleep may still be 1).
     @discardableResult func recoverIfNeeded() -> Bool
-    /// The connection to the daemon dropped, so the daemon released this app's hold.
-    func connectionLost()
+    /// The daemon connection of `generation` dropped. Returns true when that ended this
+    /// app's hold (then nothing is held any more); false for nothing held or a report about a
+    /// connection older than the one holding now.
+    func connectionLost(generation: UInt64) -> Bool
 }
 
 @MainActor public final class LidSleepService: LidSleepControlling {
     private let backend: PrivilegedBackend
-    /// This process turned disablesleep on and has not turned it off yet.
-    private var enabledHere = false
+    /// Set while this process holds disablesleep on: the generation of the daemon connection
+    /// that took the hold (the daemon releases it when that connection closes).
+    private var heldGeneration: UInt64?
 
     public init(backend: PrivilegedBackend) {
         self.backend = backend
@@ -23,14 +26,13 @@ import Foundation
     public func helperStatus() -> HelperStatus { backend.status() }
 
     public func enable() throws {
-        try backend.setSleepDisabled(true)
-        enabledHere = true
+        heldGeneration = try backend.setSleepDisabled(true)
     }
 
     public func disable() throws {
-        guard enabledHere else { return }
+        guard heldGeneration != nil else { return }
         try backend.setSleepDisabled(false)
-        enabledHere = false
+        heldGeneration = nil
     }
 
     /// Nothing to do here: the daemon undoes a leftover 1 when it starts and when this app's
@@ -38,8 +40,11 @@ import Foundation
     @discardableResult
     public func recoverIfNeeded() -> Bool { true }
 
-    /// Nothing is left to turn off: a later `disable()` does not call the daemon.
-    public func connectionLost() {
-        enabledHere = false
+    /// Any connection up to the holding one counts: a newer one dropping means the holding
+    /// one was already gone. After that a `disable()` does not call the daemon.
+    public func connectionLost(generation: UInt64) -> Bool {
+        guard let held = heldGeneration, generation >= held else { return false }
+        heldGeneration = nil
+        return true
     }
 }

@@ -43,9 +43,31 @@ struct LidSleepServiceTests {
     /// The daemon let go when the connection dropped: nothing is left to turn off.
     @Test func connectionLostForgetsTheEnable() throws {
         try svc.enable()
-        svc.connectionLost()
+        #expect(svc.connectionLost(generation: 1))
         try svc.disable()
         #expect(backend.setCalls == [true])
+    }
+
+    /// A late report about an older connection says nothing about a hold on a newer one.
+    @Test func staleLossKeepsANewerHold() throws {
+        try svc.enable()
+        try svc.disable()
+        backend.generation = 2
+        try svc.enable()
+        #expect(!svc.connectionLost(generation: 1))
+        try svc.disable()
+        #expect(backend.setCalls == [true, false, true, false])
+    }
+
+    @Test func newerLossEndsAnOlderHold() throws {
+        try svc.enable()
+        #expect(svc.connectionLost(generation: 2))
+        try svc.disable()
+        #expect(backend.setCalls == [true])
+    }
+
+    @Test func lossWithNothingHeldIsIgnored() {
+        #expect(!svc.connectionLost(generation: 1))
     }
 
     @Test func recoverIsNoop() {

@@ -8,6 +8,7 @@ private final class TestService: NSObject, HelperProtocol, @unchecked Sendable {
     private var _hang = false
     private var _version = "1.0"
     private var _infoError: String?
+    private var _setError: String? = "pmset failed"
     private var pending: [@Sendable () -> Void] = []
 
     var hang: Bool {
@@ -23,6 +24,11 @@ private final class TestService: NSObject, HelperProtocol, @unchecked Sendable {
     var infoError: String? {
         get { lock.withLock { _infoError } }
         set { lock.withLock { _infoError = newValue } }
+    }
+
+    var setError: String? {
+        get { lock.withLock { _setError } }
+        set { lock.withLock { _setError = newValue } }
     }
 
     /// Answers every reply held back while hanging (a late reply).
@@ -43,7 +49,8 @@ private final class TestService: NSObject, HelperProtocol, @unchecked Sendable {
     }
 
     func setSleepDisabled(_ disabled: Bool, reply: @escaping @Sendable (String?) -> Void) {
-        answer { reply("pmset failed") }
+        let error = self.setError
+        answer { reply(error) }
     }
 
     func info(reply: @escaping @Sendable (String, Bool, String?) -> Void) {
@@ -119,6 +126,16 @@ private final class Counter: @unchecked Sendable {
     }
 }
 
+private final class LockedValue<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: T
+    init(_ value: T) { _value = value }
+    var value: T {
+        get { lock.withLock { _value } }
+        set { lock.withLock { _value = newValue } }
+    }
+}
+
 private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
     let start = Date()
     try body()
@@ -163,7 +180,7 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         harness.service.hang = true
         let client = harness.makeClient(timeout: 0.3)
         let lost = Counter()
-        client.onConnectionLost = { lost.increment() }
+        client.onConnectionLost = { _ in lost.increment() }
         #expect(throws: HelperError.commandFailed("timed out")) { try client.info() }
         #expect(lost.fired.wait(timeout: .now() + 2) == .success)
         // The invalidated connection's own handler runs too; it must not report again.
@@ -177,7 +194,7 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         let client = harness.makeClient(timeout: 0.5)
         let lost = Counter()
         let retried = DispatchSemaphore(value: 0)
-        client.onConnectionLost = { [weak client] in
+        client.onConnectionLost = { [weak client] _ in
             // Retry once, synchronously, against the still silent service.
             guard lost.increment() == 1 else { return }
             _ = try? client?.info()
@@ -196,7 +213,7 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         harness.service.hang = true
         let client = harness.makeClient(timeout: 0.3)
         let lost = Counter()
-        client.onConnectionLost = { lost.increment() }
+        client.onConnectionLost = { _ in lost.increment() }
         #expect(throws: HelperError.commandFailed("timed out")) { try client.info() }
         #expect(lost.fired.wait(timeout: .now() + 2) == .success)
         harness.service.hang = false
@@ -208,7 +225,7 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         let harness = Harness()
         let client = harness.makeClient()
         let lost = Counter()
-        client.onConnectionLost = { lost.increment() }
+        client.onConnectionLost = { _ in lost.increment() }
         #expect(try client.info().version == "1.0")
         // The client is idle: only its XPC handlers can notice (XPC reports an interruption).
         harness.invalidateServerConnections()
@@ -217,6 +234,25 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         #expect(lost.value == 1)
         #expect(try client.info().version == "1.0")
         #expect(harness.connectionsMade == 2)
+    }
+
+    /// The loss names the connection it ended, and each call says which connection served it.
+    @Test func lossCarriesTheGenerationThatServedTheCall() throws {
+        let harness = Harness()
+        harness.service.setError = nil
+        let client = harness.makeClient()
+        let lostGeneration = LockedValue<UInt64?>(nil)
+        let lost = Counter()
+        client.onConnectionLost = { generation in
+            lostGeneration.value = generation
+            lost.increment()
+        }
+        let first = try client.setSleepDisabled(true)
+        harness.invalidateServerConnections()
+        #expect(lost.fired.wait(timeout: .now() + 2) == .success)
+        #expect(lostGeneration.value == first)
+        let second = try client.setSleepDisabled(true)
+        #expect(second > first)
     }
 
     @Test func lateReplyAfterTimeoutIsIgnored() throws {
