@@ -71,8 +71,10 @@ final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
                 Task { @MainActor in
                     // The session stopped or was extended while this post was waiting.
                     if let staleCheck, staleCheck != self.endingSoonGeneration { return }
-                    center.add(request) { error in
-                        if let error { log.error("notification add failed: \(error.localizedDescription, privacy: .public)") }
+                    do {
+                        try await center.add(request)
+                    } catch {
+                        log.error("notification add failed: \(error.localizedDescription, privacy: .public)")
                     }
                 }
             }
