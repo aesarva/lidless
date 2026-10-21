@@ -7,6 +7,7 @@ private final class TestService: NSObject, HelperProtocol, @unchecked Sendable {
     private let lock = NSLock()
     private var _hang = false
     private var _version = "1.0"
+    private var _infoError: String?
     private var pending: [@Sendable () -> Void] = []
 
     var hang: Bool {
@@ -17,6 +18,11 @@ private final class TestService: NSObject, HelperProtocol, @unchecked Sendable {
     var version: String {
         get { lock.withLock { _version } }
         set { lock.withLock { _version = newValue } }
+    }
+
+    var infoError: String? {
+        get { lock.withLock { _infoError } }
+        set { lock.withLock { _infoError = newValue } }
     }
 
     /// Answers every reply held back while hanging (a late reply).
@@ -40,9 +46,9 @@ private final class TestService: NSObject, HelperProtocol, @unchecked Sendable {
         answer { reply("pmset failed") }
     }
 
-    func info(reply: @escaping @Sendable (String, Bool) -> Void) {
-        let version = self.version
-        answer { reply(version, true) }
+    func info(reply: @escaping @Sendable (String, Bool, String?) -> Void) {
+        let (version, error) = (self.version, self.infoError)
+        answer { reply(version, true, error) }
     }
 
     func removeLegacyHelper(reply: @escaping @Sendable ([String], String?) -> Void) {
@@ -133,6 +139,13 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         #expect(throws: HelperError.commandFailed("pmset failed")) {
             try client.setSleepDisabled(true)
         }
+    }
+
+    @Test func errorInInfoReplyThrows() {
+        let harness = Harness()
+        harness.service.infoError = "pmset -g failed"
+        let client = harness.makeClient()
+        #expect(throws: HelperError.commandFailed("pmset -g failed")) { try client.info() }
     }
 
     @Test func silentServiceTimesOut() {

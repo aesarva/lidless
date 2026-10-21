@@ -65,6 +65,12 @@ public final class SleepGuard: @unchecked Sendable {
         return holders.isEmpty && marker == .none
     }
 
+    /// A cleanup failed and nobody holds: `retryPendingReset()` has work to do.
+    public var hasPendingReset: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return holders.isEmpty && marker != .none
+    }
+
     public func acquire(_ holder: UUID) throws {
         lock.lock(); defer { lock.unlock() }
         if holders.isEmpty {

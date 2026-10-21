@@ -3,56 +3,38 @@ import LidlessCore
 import os
 
 // Privileged daemon, started by launchd from the plist registered via SMAppService.
-// Skeleton: only `info` is implemented so far.
+// Order matters: a leftover disablesleep 1 is undone before any client can connect.
 
-final class HelperService: NSObject, HelperProtocol {
-    private static let log = Logger(subsystem: HelperIDs.helper, category: "daemon")
+let log = Logger(subsystem: HelperIDs.helper, category: "daemon")
+let sleepGuard = SleepGuard(setting: PmsetSleepSetting(), store: FileOwnershipStore())
 
-    func setSleepDisabled(_ disabled: Bool, reply: @escaping @Sendable (String?) -> Void) {
-        reply("not implemented")
-    }
-
-    func info(reply: @escaping @Sendable (String, Bool) -> Void) {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-        var sleepDisabled = false
-        do {
-            let result = try ProcessCommandRunner().run("/usr/bin/pmset", ["-g"])
-            sleepDisabled = PmsetParser.sleepDisabled(in: result.stdout)
-        } catch {
-            Self.log.error("pmset -g failed: \(error.localizedDescription, privacy: .public)")
-        }
-        reply(version, sleepDisabled)
-    }
-
-    func removeLegacyHelper(reply: @escaping @Sendable ([String], String?) -> Void) {
-        reply([], "not implemented")
-    }
+do {
+    try sleepGuard.recoverAtStart()
+} catch {
+    // Stays pending: the daemon retries it and does not exit while it is pending.
+    log.error("recovery at start failed: \(String(describing: error), privacy: .public)")
 }
 
-final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
-    private static let log = Logger(subsystem: HelperIDs.helper, category: "daemon")
-    /// nil when the daemon has no Team ID (ad-hoc build): every connection is refused.
-    private let clientRequirement = CodeSigningRequirement.requirement(
-        identifier: HelperIDs.app, teamID: CodeSigningRequirement.ownTeamID()
-    )
-
-    func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
-        guard let clientRequirement else {
-            Self.log.error("no Team ID in own signature, refusing connection")
-            return false
-        }
-        // Checked by XPC on every message: a client with another signature gets an error.
-        connection.setCodeSigningRequirement(clientRequirement)
-        connection.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
-        connection.exportedObject = HelperService()
-        connection.resume()
-        return true
+// launchd sends SIGTERM on unregister, Login Items toggle and shutdown.
+signal(SIGTERM, SIG_IGN)
+let sigterm = DispatchSource.makeSignalSource(
+    signal: SIGTERM, queue: DispatchQueue(label: "io.github.aesarva.Lidless.helper.sigterm"))
+sigterm.setEventHandler {
+    do {
+        try sleepGuard.releaseAll()
+    } catch {
+        log.error("release on SIGTERM failed: \(String(describing: error), privacy: .public)")
     }
+    log.notice("SIGTERM, exiting")
+    exit(0)
 }
+sigterm.resume()
 
-let delegate = ListenerDelegate()
+let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+let daemon = Daemon(guard: sleepGuard, cleaner: LegacyHelperCleaner(), version: version)
 let listener = NSXPCListener(machServiceName: HelperIDs.helper)
-listener.delegate = delegate
+listener.delegate = daemon
 listener.resume()
-Logger(subsystem: HelperIDs.helper, category: "daemon").notice("listening")
+daemon.reevaluate()
+log.notice("listening, version \(version, privacy: .public)")
 dispatchMain()

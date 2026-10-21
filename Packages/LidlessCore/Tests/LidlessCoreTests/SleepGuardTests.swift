@@ -96,6 +96,21 @@ import Testing
         #expect(guardian.isIdle)
     }
 
+    @Test func pendingResetOnlyWhileUnheld() throws {
+        let (guardian, setting, _) = make(initial: false)
+        try guardian.acquire(a)
+        #expect(!guardian.hasPendingReset)
+        setting.failWriteZeroTimes = 1
+        #expect(throws: FakeSleepSettingError.self) { try guardian.release(a) }
+        #expect(guardian.hasPendingReset)
+        // A new holder takes the pending reset over: nothing to retry while it holds.
+        try guardian.acquire(b)
+        #expect(!guardian.hasPendingReset)
+        try guardian.release(b)
+        #expect(!guardian.hasPendingReset)
+        #expect(guardian.isIdle)
+    }
+
     @Test func appliedWriteOneThenFailedRollbackStaysPending() throws {
         let (guardian, setting, store) = make(initial: false)
         setting.failWriteOne = true

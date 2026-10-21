@@ -16,8 +16,8 @@ public protocol HelperClient: AnyObject, Sendable {
     func info() throws -> HelperInfo
     /// Returns the removed paths.
     func removeLegacyHelper() throws -> [String]
-    /// Called after the connection is dropped (daemon exited, crashed or rejected us);
-    /// the next call opens a new one.
+    /// Called after the connection is dropped (timeout, daemon idle exit, crash or rejection);
+    /// the next call opens a new one. A cue to re-check state, not an error by itself.
     var onConnectionLost: (@Sendable () -> Void)? { get set }
 }
 
@@ -64,11 +64,13 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
     }
 
     public func info() throws -> HelperInfo {
-        try call { helper, reply in
-            helper.info { version, sleepDisabled in
-                reply(HelperInfo(version: version, sleepDisabled: sleepDisabled))
+        let (info, error): (HelperInfo, String?) = try call { helper, reply in
+            helper.info { version, sleepDisabled, error in
+                reply((HelperInfo(version: version, sleepDisabled: sleepDisabled), error))
             }
         }
+        if let error { throw HelperError.commandFailed(error) }
+        return info
     }
 
     public func removeLegacyHelper() throws -> [String] {
