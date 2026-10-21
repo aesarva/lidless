@@ -52,6 +52,9 @@ import os
     private let log = Logger(subsystem: HelperIDs.app, category: "helper")
     private var poll: PollHandle?
     private var refreshTask: Task<Void, Never>?
+    private var fallbackTask: Task<Void, Never>?
+    /// Calls `onBecameInstalled` once the fallback that the approval started has finished.
+    private var transitionTask: Task<Void, Never>?
     private var legacySeen = false
     /// The 0.2.0 files are gone (or never were): no more checks this launch.
     private var legacyGone = false
@@ -79,7 +82,8 @@ import os
         let task = Task {
             await Task.detached { backend.refreshInfo() }.value
             update()
-            await removeLegacyIfNeeded()
+            await startFallbackIfNeeded()?.value
+            await transitionTask?.value
             refreshTask = nil
         }
         refreshTask = task
@@ -96,7 +100,18 @@ import os
         }
         updatePolling()
         if changed { onChange?() }
-        if becameInstalled { onBecameInstalled?() }
+        guard becameInstalled else { return }
+        // The fallback goes first: the callback may take lid mode, and the daemon refuses
+        // the removal while lid mode is held.
+        if let fallback = startFallbackIfNeeded() {
+            transitionTask = Task {
+                await fallback.value
+                onBecameInstalled?()
+                transitionTask = nil
+            }
+        } else {
+            onBecameInstalled?()
+        }
     }
 
     /// Polls while macOS waits for the user's approval: a menu-bar app is not told when they
@@ -124,10 +139,21 @@ import os
         return true
     }
 
+    /// Starts the fallback removal when it is due; returns the one running, if any.
+    private func startFallbackIfNeeded() -> Task<Void, Never>? {
+        if let fallbackTask { return fallbackTask }
+        guard status == .installed, !legacyGone, !fallbackAttempted, !lidModeHeld() else { return nil }
+        let task = Task {
+            await removeLegacy()
+            fallbackTask = nil
+        }
+        fallbackTask = task
+        return task
+    }
+
     /// Asks the daemon to remove 0.2.0 files it did not remove at start. "Busy" (lid mode
     /// held) does not count as the attempt; any other failure is kept and not retried.
-    private func removeLegacyIfNeeded() async {
-        guard status == .installed, !legacyGone, !fallbackAttempted, !lidModeHeld() else { return }
+    private func removeLegacy() async {
         let backend = self.backend
         let failure: String? = await Task.detached {
             do {

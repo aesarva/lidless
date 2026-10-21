@@ -397,18 +397,65 @@ struct SessionControllerSafetyTests {
         #expect(c.attention == nil)
     }
 
-    /// A failed helper removal brings the setting back without acquiring lid mode or lifting
-    /// a safety suspension.
-    @Test func restoreLidModePreferenceOnlyRestoresTheSetting() {
+    /// Switching the helper off in Login Items mid-session drops the hold: that is a loss the
+    /// user must hear about once, even though the helper now waits for approval.
+    @Test func lostHoldWhileWaitingForApprovalRaisesAttention() {
+        startWithLid()
+        lid.status = .needsApproval
+        c.helperConnectionLost(generation: 1)
+        c.helperConnectionLost(generation: 1)
+        #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+        #expect(c.attention == .helperUnavailable)
+        #expect(notifier.posted == [.lidModeSuspended(.helperUnavailable)])
+        #expect(lid.enableCalls == 1)
+        lid.status = .installed
+        c.helperDidChange()
+        #expect(lid.enableCalls == 2)
+        #expect(c.session?.lidModeActive == true)
+    }
+
+    /// A failed helper removal keeps a safety suspension as it was and acquires nothing.
+    @Test func failedRemovalKeepsSafetySuspension() {
         startWithLid()
         c.update(readings: readings(thermal: .serious))
         #expect(c.session?.lidModeSuspendedReason == .thermal)
-        c.setLidMode(false)
-        c.restoreLidModePreference(true)
+        let point = c.beginHelperRemoval()
+        #expect(c.settings.lidModeEnabled == false)
+        c.restoreAfterFailedRemoval(point)
         #expect(c.settings.lidModeEnabled == true)
         #expect(store.stored.lidModeEnabled == true)
         #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
         #expect(lid.enableCalls == 1)
+    }
+
+    /// Lid mode that was on comes back through the safety-checked retry, keeping its start.
+    @Test func failedRemovalReenablesActiveLidMode() {
+        startWithLid()
+        clock.advance(600)
+        let point = c.beginHelperRemoval()
+        #expect(lid.disableCalls == 1)
+        #expect(c.session?.lidModeActive == false)
+        c.restoreAfterFailedRemoval(point)
+        #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+        #expect(c.attention == nil)
+        #expect(notifier.posted.isEmpty)
+        #expect(lid.enableCalls == 1)
+        c.update(readings: readings())
+        #expect(lid.enableCalls == 2)
+        #expect(c.session?.lidModeActive == true)
+        #expect(c.session?.lidModeEnabledAt == t0)
+    }
+
+    @Test func failedRemovalWithLidModeOffStaysOff() {
+        c.start(.indefinite)
+        let point = c.beginHelperRemoval()
+        c.restoreAfterFailedRemoval(point)
+        #expect(c.settings.lidModeEnabled == false)
+        #expect(c.session?.lidModeSuspendedReason == nil)
+        c.update(readings: readings())
+        #expect(lid.enableCalls == 0)
     }
 
     /// Loss of an older connection reported after lid mode was re-acquired on a newer one:

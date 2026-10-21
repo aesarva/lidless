@@ -53,14 +53,13 @@ struct HelperTab: View {
     }
 
     /// Turns lid mode off while the helper can still do it; the setting stays off, so nothing
-    /// turns it back on while the removal runs. If the removal fails, only the setting comes
-    /// back: lid mode is not acquired again behind the safety rules.
+    /// turns it back on while the removal runs. If the removal fails, lid mode comes back as
+    /// it was, through the safety-checked retry.
     private func remove() {
-        let wasEnabled = controller.settings.lidModeEnabled
-        controller.setLidMode(false)
+        let point = controller.beginHelperRemoval()
         run({ await helper.uninstall() },
             onSuccess: { controller.helperDidChange() },
-            onFailure: { controller.restoreLidModePreference(wasEnabled) })
+            onFailure: { controller.restoreAfterFailedRemoval(point) })
     }
 
     private func run(_ work: @escaping () async -> HelperError?,

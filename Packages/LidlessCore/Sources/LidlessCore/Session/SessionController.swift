@@ -71,7 +71,7 @@ import os
             endingSoonNotified: Self.isWithinWarning(endsAt, now: now)
         ))
         startBlock = nil
-        if settings.lidModeEnabled { enableLidMode() }
+        if settings.lidModeEnabled { enableLidMode(quietUntilApproved: true) }
         return true
     }
 
@@ -142,7 +142,7 @@ import os
         guard let s = session else { return }
         if on {
             guard !s.lidModeActive else { return }
-            enableLidMode()
+            enableLidMode(quietUntilApproved: true)
         } else {
             if disableLidHandlingFailure() {
                 mutateSession {
@@ -153,10 +153,29 @@ import os
         }
     }
 
-    /// Brings back the lid-mode setting alone (e.g. after a failed helper removal): nothing is
-    /// acquired and a safety suspension stays in place.
-    public func restoreLidModePreference(_ on: Bool) {
-        settings.lidModeEnabled = on
+    /// Turns lid mode off before the helper is removed (while the helper can still do it) and
+    /// returns what to bring back if the removal fails.
+    public func beginHelperRemoval() -> LidModeRestorePoint {
+        let point = LidModeRestorePoint(
+            lidModeEnabled: settings.lidModeEnabled,
+            wasActive: session?.lidModeActive ?? false,
+            suspendedReason: session?.lidModeSuspendedReason
+        )
+        setLidMode(false)
+        return point
+    }
+
+    /// The helper removal failed: the setting comes back, a safety suspension comes back as
+    /// it was, and lid mode that was on (or waiting for the helper) is left to the
+    /// safety-checked retry, which keeps its original start time. Nothing is acquired here.
+    public func restoreAfterFailedRemoval(_ point: LidModeRestorePoint) {
+        settings.lidModeEnabled = point.lidModeEnabled
+        guard point.lidModeEnabled, let s = session, !s.lidModeActive else { return }
+        if let reason = point.suspendedReason, reason != .helperUnavailable {
+            mutateSession { $0.lidModeSuspendedReason = reason }
+        } else if point.wasActive || point.suspendedReason == .helperUnavailable {
+            mutateSession { $0.lidModeSuspendedReason = .helperUnavailable }
+        }
     }
 
     public func tick() {
@@ -314,19 +333,21 @@ import os
 
     /// `keepingStart`: automatic recovery keeps `lidModeEnabledAt`, so the battery time limit
     /// is not restarted. The user's own enable starts a new interval, even if it fails, so the
-    /// automatic retry after it is judged by the new interval.
+    /// automatic retry after it is judged by the new interval. `quietUntilApproved`: the
+    /// user's own enable or a session start, before the helper is set up or allowed, just
+    /// waits; losing a hold that way (e.g. the helper switched off in Login Items) is reported.
     @discardableResult
-    private func enableLidMode(keepingStart: Bool = false) -> Bool {
+    private func enableLidMode(keepingStart: Bool = false, quietUntilApproved: Bool = false) -> Bool {
         mutateSession {
             if !keepingStart || $0.lidModeEnabledAt == nil { $0.lidModeEnabledAt = clock.now }
         }
         switch lid.helperStatus() {
         case .notInstalled, .needsApproval:
-            // Waiting for the user to set up or allow the helper: nothing to call yet and
-            // nothing to warn about. `helperDidChange` / the poll retry turn it on later.
+            // Nothing to call yet; `helperDidChange` / the poll retry turn it on later.
             mutateSession {
                 if !$0.lidModeActive { $0.lidModeSuspendedReason = .helperUnavailable }
             }
+            if !quietUntilApproved { raiseHelperUnavailable() }
             return false
         case .installed, .unsigned, .error:
             break

@@ -131,6 +131,26 @@ struct HelperCoordinatorTests {
         #expect(c.legacyError == "cannot unlink /etc/sudoers.d/lidless")
     }
 
+    /// On approval the fallback goes before the callback, which may take lid mode and would
+    /// otherwise make the daemon refuse it; its error is kept.
+    @Test func fallbackRunsBeforeOnBecameInstalled() async {
+        let held = HeldFlag()
+        held.value = false
+        let c = make(status: .needsApproval, legacy: true, held: { held.value })
+        backend.removeLegacyError = .commandFailed("cannot unlink /etc/sudoers.d/lidless")
+        var callsSeenByCallback: [Int] = []
+        c.onBecameInstalled = { [backend] in
+            callsSeenByCallback.append(backend.removeLegacyCalls)
+            held.value = true
+        }
+        await c.refresh().value
+        backend.stubStatus = .installed
+        await c.refresh().value
+        #expect(callsSeenByCallback == [1])
+        #expect(backend.removeLegacyCalls == 1)
+        #expect(c.legacyError == "cannot unlink /etc/sudoers.d/lidless")
+    }
+
     /// The daemon removed the files itself at start: the line shows without an app call.
     @Test func removalByTheDaemonIsDetected() async {
         let c = make(status: .needsApproval, legacy: true)
