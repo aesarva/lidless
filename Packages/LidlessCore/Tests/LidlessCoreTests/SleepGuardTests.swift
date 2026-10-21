@@ -96,6 +96,49 @@ import Testing
         #expect(guardian.isIdle)
     }
 
+    @Test func appliedWriteOneThenFailedRollbackStaysPending() throws {
+        let (guardian, setting, store) = make(initial: false)
+        setting.failWriteOne = true
+        setting.applyFailedWriteOne = true
+        setting.failWriteZeroTimes = 1
+        #expect(throws: FakeSleepSettingError.self) { try guardian.acquire(a) }
+        #expect(setting.value)
+        #expect(store.exists())
+        #expect(!guardian.isIdle)
+        setting.failWriteOne = false
+        try guardian.retryPendingReset()
+        #expect(!setting.value)
+        #expect(!store.exists())
+        #expect(guardian.isIdle)
+    }
+
+    @Test func createFailureLeavingFileIsCleanedUp() throws {
+        let (guardian, setting, store) = make(initial: false)
+        store.failCreate = true
+        #expect(throws: FakeSleepSettingError.self) { try guardian.acquire(a) }
+        #expect(!store.exists())
+        #expect(guardian.isIdle)
+        #expect(setting.writes == [false])
+    }
+
+    @Test func createFailureWithFailedCleanupStaysPending() throws {
+        let (guardian, setting, store) = make(initial: false)
+        store.failCreate = true
+        store.failRemove = true
+        #expect(throws: FakeSleepSettingError.self) { try guardian.acquire(a) }
+        #expect(store.exists())
+        #expect(!guardian.isIdle)
+        store.failRemove = false
+        try guardian.retryPendingReset()
+        #expect(!store.exists())
+        #expect(guardian.isIdle)
+        setting.value = true
+        let before = setting.writes.count
+        try guardian.acquire(a)
+        try guardian.release(a)
+        #expect(setting.writes.count == before)
+    }
+
     @Test func removeFailureAfterResetStaysPending() throws {
         let (guardian, setting, store) = make(initial: false)
         try guardian.acquire(a)

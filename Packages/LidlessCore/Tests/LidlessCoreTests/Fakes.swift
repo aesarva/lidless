@@ -175,8 +175,8 @@ final class MemoryOwnershipStore: OwnershipStore, @unchecked Sendable {
 
     func create() throws {
         lock.lock(); defer { lock.unlock() }
-        if _failCreate { throw FakeSleepSettingError() }
         _exists = true
+        if _failCreate { throw FakeSleepSettingError() }
     }
     func remove() throws {
         lock.lock(); defer { lock.unlock() }
@@ -197,6 +197,7 @@ final class FakeSleepSetting: SleepSetting, @unchecked Sendable {
     private var _fileExistedAtAttempt: [Bool] = []
     private var _failRead = false
     private var _failWriteOne = false
+    private var _applyFailedWriteOne = false
     private var _failWriteZeroTimes = 0
 
     init(initial: Bool, store: MemoryOwnershipStore) { _value = initial; self.store = store }
@@ -216,6 +217,11 @@ final class FakeSleepSetting: SleepSetting, @unchecked Sendable {
         get { lock.lock(); defer { lock.unlock() }; return _failWriteOne }
         set { lock.lock(); defer { lock.unlock() }; _failWriteOne = newValue }
     }
+    /// A failing write 1 still takes effect before it throws.
+    var applyFailedWriteOne: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _applyFailedWriteOne }
+        set { lock.lock(); defer { lock.unlock() }; _applyFailedWriteOne = newValue }
+    }
     var failWriteZeroTimes: Int {
         get { lock.lock(); defer { lock.unlock() }; return _failWriteZeroTimes }
         set { lock.lock(); defer { lock.unlock() }; _failWriteZeroTimes = newValue }
@@ -230,7 +236,10 @@ final class FakeSleepSetting: SleepSetting, @unchecked Sendable {
     func setDisabled(_ disabled: Bool) throws {
         lock.lock(); defer { lock.unlock() }
         _fileExistedAtAttempt.append(store.exists())
-        if disabled, _failWriteOne { throw FakeSleepSettingError() }
+        if disabled, _failWriteOne {
+            if _applyFailedWriteOne { _value = true }
+            throw FakeSleepSettingError()
+        }
         if !disabled, _failWriteZeroTimes > 0 { _failWriteZeroTimes -= 1; throw FakeSleepSettingError() }
         _value = disabled
         _writes.append(disabled)

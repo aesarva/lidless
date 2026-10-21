@@ -60,11 +60,12 @@ public final class SleepGuard: @unchecked Sendable {
         if holders.isEmpty {
             // Read the real value even when `owned`: a failed earlier reset may have left it at 0.
             if try !setting.isDisabled() {
-                try store.create()
                 do {
+                    try store.create()
                     try setting.setDisabled(true)
                 } catch {
-                    // The write may have landed before failing: keep ownership until a 0 is confirmed.
+                    // create() may have left the file behind, or the write may have landed:
+                    // keep ownership until a 0 is confirmed.
                     owned = true
                     try? resetIfUnheld()
                     throw error
