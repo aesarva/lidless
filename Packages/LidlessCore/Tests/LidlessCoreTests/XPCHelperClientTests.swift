@@ -56,8 +56,18 @@ private final class Harness: NSObject, NSXPCListenerDelegate, @unchecked Sendabl
     private let listener = NSXPCListener.anonymous()
     private let lock = NSLock()
     private var made = 0
+    private var accepted: [NSXPCConnection] = []
 
     var connectionsMade: Int { lock.withLock { made } }
+
+    /// Drops every accepted connection from the service side, as a daemon exit would.
+    func invalidateServerConnections() {
+        let connections = lock.withLock { () -> [NSXPCConnection] in
+            defer { accepted = [] }
+            return accepted
+        }
+        connections.forEach { $0.invalidate() }
+    }
 
     override init() {
         super.init()
@@ -73,6 +83,7 @@ private final class Harness: NSObject, NSXPCListenerDelegate, @unchecked Sendabl
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
         connection.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
         connection.exportedObject = service
+        lock.withLock { accepted.append(connection) }
         connection.resume()
         return true
     }
@@ -176,6 +187,21 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         #expect(throws: HelperError.commandFailed("timed out")) { try client.info() }
         #expect(lost.fired.wait(timeout: .now() + 2) == .success)
         harness.service.hang = false
+        #expect(try client.info().version == "1.0")
+        #expect(harness.connectionsMade == 2)
+    }
+
+    @Test func serverSideLossIsReportedOnceAndReconnects() throws {
+        let harness = Harness()
+        let client = harness.makeClient()
+        let lost = Counter()
+        client.onConnectionLost = { lost.increment() }
+        #expect(try client.info().version == "1.0")
+        // The client is idle: only its XPC handlers can notice (XPC reports an interruption).
+        harness.invalidateServerConnections()
+        #expect(lost.fired.wait(timeout: .now() + 2) == .success)
+        Thread.sleep(forTimeInterval: 0.2)
+        #expect(lost.value == 1)
         #expect(try client.info().version == "1.0")
         #expect(harness.connectionsMade == 2)
     }
