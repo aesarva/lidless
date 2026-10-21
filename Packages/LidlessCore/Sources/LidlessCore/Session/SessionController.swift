@@ -157,6 +157,7 @@ import os
     /// returns what to bring back if the removal fails.
     public func beginHelperRemoval() -> LidModeRestorePoint {
         let point = LidModeRestorePoint(
+            sessionStartedAt: session?.startedAt,
             lidModeEnabled: settings.lidModeEnabled,
             wasActive: session?.lidModeActive ?? false,
             suspendedReason: session?.lidModeSuspendedReason
@@ -168,9 +169,13 @@ import os
     /// The helper removal failed: the setting comes back, a safety suspension comes back as
     /// it was, and lid mode that was on (or waiting for the helper) is left to the
     /// safety-checked retry, which keeps its original start time. Nothing is acquired here.
+    /// Only the setting comes back for another session, or when a safety rule suspended lid
+    /// mode meanwhile: that suspension stays until the user turns lid mode on again.
     public func restoreAfterFailedRemoval(_ point: LidModeRestorePoint) {
         settings.lidModeEnabled = point.lidModeEnabled
-        guard point.lidModeEnabled, let s = session, !s.lidModeActive else { return }
+        guard point.lidModeEnabled, let s = session, s.startedAt == point.sessionStartedAt,
+              !s.lidModeActive else { return }
+        if let current = s.lidModeSuspendedReason, current != .helperUnavailable { return }
         if let reason = point.suspendedReason, reason != .helperUnavailable {
             mutateSession { $0.lidModeSuspendedReason = reason }
         } else if point.wasActive || point.suspendedReason == .helperUnavailable {

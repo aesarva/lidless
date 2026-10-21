@@ -448,6 +448,38 @@ struct SessionControllerSafetyTests {
         #expect(c.session?.lidModeEnabledAt == t0)
     }
 
+    /// A safety suspension that happened during the removal stays: the restore must not turn
+    /// it into a helper wait that the poll would re-acquire.
+    @Test func failedRemovalKeepsANewerSafetySuspension() {
+        startWithLid()
+        lid.failDisable = true
+        let point = c.beginHelperRemoval()
+        #expect(c.session?.lidModeActive == true)
+        lid.failDisable = false
+        c.update(readings: readings(thermal: .serious))
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        c.restoreAfterFailedRemoval(point)
+        #expect(c.settings.lidModeEnabled == true)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        c.update(readings: readings())
+        #expect(lid.enableCalls == 1)
+        #expect(c.session?.lidModeActive == false)
+    }
+
+    /// A restore point from an earlier session only brings back the setting.
+    @Test func failedRemovalIgnoresAnotherSession() {
+        startWithLid()
+        let point = c.beginHelperRemoval()
+        c.stop(.user)
+        clock.advance(60)
+        c.start(.indefinite)
+        c.restoreAfterFailedRemoval(point)
+        #expect(c.settings.lidModeEnabled == true)
+        #expect(c.session?.lidModeSuspendedReason == nil)
+        c.update(readings: readings())
+        #expect(lid.enableCalls == 1)
+    }
+
     @Test func failedRemovalWithLidModeOffStaysOff() {
         c.start(.indefinite)
         let point = c.beginHelperRemoval()

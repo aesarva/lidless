@@ -46,6 +46,8 @@ public enum SessionState: Equatable, Sendable {
 
 /// Closed-lid mode as it was before a helper removal (`SessionController.beginHelperRemoval`).
 public struct LidModeRestorePoint: Equatable, Sendable {
+    /// Identifies the session it belongs to (nil: none was running).
+    public let sessionStartedAt: Date?
     public let lidModeEnabled: Bool
     public let wasActive: Bool
     public let suspendedReason: SafetyReason?
