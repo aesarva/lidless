@@ -23,7 +23,7 @@ public protocol HelperClient: AnyObject, Sendable {
 
 /// `HelperClient` over one lazy `NSXPCConnection` to the daemon's Mach service.
 public final class XPCHelperClient: HelperClient, @unchecked Sendable {
-    private let requirement: String
+    private let makeConnection: @Sendable () -> NSXPCConnection
     private let timeout: TimeInterval
     private let lock = NSLock()
     private var connection: NSXPCConnection?
@@ -32,9 +32,19 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
     private var lostHandler: (@Sendable () -> Void)?
 
     /// `requirement` is the code-signing requirement the daemon must satisfy.
-    public init(requirement: String, timeout: TimeInterval = 5) {
-        self.requirement = requirement
+    public convenience init(requirement: String, timeout: TimeInterval = 5) {
+        self.init(timeout: timeout) {
+            let c = NSXPCConnection(machServiceName: HelperIDs.helper, options: .privileged)
+            c.setCodeSigningRequirement(requirement)
+            return c
+        }
+    }
+
+    /// `makeConnection` returns a new, not yet resumed connection to a `HelperProtocol`
+    /// service (tests pass an anonymous listener's endpoint).
+    public init(timeout: TimeInterval = 5, makeConnection: @escaping @Sendable () -> NSXPCConnection) {
         self.timeout = timeout
+        self.makeConnection = makeConnection
     }
 
     deinit {
@@ -76,9 +86,8 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
             if let connection { return (connection, generation) }
             generation += 1
             let current = generation
-            let c = NSXPCConnection(machServiceName: HelperIDs.helper, options: .privileged)
+            let c = makeConnection()
             c.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
-            c.setCodeSigningRequirement(requirement)
             // Interruption (the daemon exited) is treated like invalidation: start over next call.
             c.interruptionHandler = { [weak self] in self?.drop(current) }
             c.invalidationHandler = { [weak self] in self?.drop(current) }
@@ -89,6 +98,8 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
     }
 
     /// Clears the connection of `expected` generation, invalidates it and reports the loss once.
+    /// The report is asynchronous: a handler that calls the client again must not hold up
+    /// (or nest its own timeout inside) the call that is returning the timeout error.
     private func drop(_ expected: Int) {
         let dropped: (NSXPCConnection, (@Sendable () -> Void)?)? = lock.withLock {
             guard generation == expected, let c = connection else { return nil }
@@ -98,7 +109,7 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
         guard let (c, handler) = dropped else { return }
         // Its own invalidation handler then finds a newer (or no) generation and does nothing.
         c.invalidate()
-        handler?()
+        if let handler { DispatchQueue.global().async(execute: handler) }
     }
 
     /// Sends one message and waits up to `timeout` for its reply.
