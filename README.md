@@ -48,7 +48,7 @@ Most keep-awake utilities stop at "don't sleep while the lid is open". Lidless i
 | **Sessions** | 15 min, 1 h, 3 h (presets are editable), *Until…* a time of day, or indefinitely (∞). Pick a length to start right away or to restart a running session with a new length. |
 | **The sign** | Press it (or hit Return) to go on air / off air. Lit red while on air, with a countdown or time-on-air clock; dark glass when off. |
 | **Display** | *Keep display on* keeps the screen lit; otherwise the screen may sleep while the Mac stays awake. |
-| **Closed-lid mode** | The Mac keeps running with the lid shut; the screen turns off at once. Needs a one-time approval of the helper ([details](#closed-lid-mode-and-the-helper)). |
+| **Closed-lid mode** | The Mac keeps running with the lid shut; the screen turns off at once. Needs a one-time approval of the helper in System Settings ([details](#closed-lid-mode-and-the-helper)). |
 | **Safety meters** | Battery and heat as studio meters on the panel, with the battery stop line drawn in. |
 | **Notifications** | A heads-up 5 minutes before a timed session ends, with **+30 min** and **+1 h** buttons; a note when a safety rule stops or pauses something. |
 | **Menu-bar icon** | A quiet line when off; a lit lamp on air; optional remaining-time text next to it. |
@@ -114,8 +114,8 @@ When the lid closes in closed-lid mode, Lidless turns the screen off (`pmset dis
 - **One command.** The helper's only privileged action is `pmset -a disablesleep 0|1`. It takes no paths or arguments from the app beyond that on/off choice.
 - **Signature checks both ways.** The helper accepts connections only from Lidless signed by the same Developer ID team as the helper, and Lidless connects only to a helper signed by that team. A build with no team (ad-hoc) is refused on both sides.
 - **Reset on disconnect and at boot.** Normal sleep returns when the connection ends and, after a reboot, at boot.
-- **The bundle must stay trustworthy.** The daemon runs from inside `Lidless.app`. Keep the app where only administrators can write to it (for example `/Applications`); if the bundle is writable by others, whoever can replace it could replace the helper. Run Lidless from one location: macOS ties the registration to the bundle path.
-- **If the helper breaks** while closed-lid mode is on (for example, you switch it off in Login Items), Lidless shows the orange dot, and normal sleep is restored.
+- **Run from one location.** Run Lidless from one location (for example `/Applications`): macOS ties the registration to the bundle path.
+- **If the helper breaks or is switched off** (for example, in Login Items) while closed-lid mode is on, normal sleep is restored and Lidless shows the orange dot.
 
 ### Upgrading from 0.2.0
 
@@ -153,7 +153,7 @@ Closed-lid mode works only in builds signed with a Developer ID (releases, or yo
 SIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" scripts/build-app.sh
 ```
 
-Unsigned and ad-hoc builds run normal sessions and show "needs a signed build" for closed-lid mode. Run the signed build from one place; the helper registration is tied to the bundle path.
+Unsigned and ad-hoc builds run normal sessions and show "needs a signed build" for closed-lid mode. Run the signed build from one place (see [Security model](#security-model)).
 
 ### Signed release
 
