@@ -220,4 +220,20 @@ import Testing
         #expect(removed == [marker])
         #expect(exists(root, "real.txt"))
     }
+
+    @Test func unreadableMarkerDirThrowsBeforeAnyAction() throws {
+        let root = try makeRoot()
+        let dir = root.appendingPathComponent(LegacyHelperCleaner.markerDirectory)
+        defer {
+            chmod(dir.path, 0o755)
+            try? FileManager.default.removeItem(at: root)
+        }
+        for p in LegacyHelperCleaner.paths + [marker] { try touch(root, p) }
+        chmod(dir.path, 0o000)
+        let runner = FakeCommandRunner()
+        #expect(throws: HelperError.self) { try LegacyHelperCleaner(root: root, runner: runner).clean() }
+        #expect(runner.calls.isEmpty)
+        chmod(dir.path, 0o755)
+        for p in LegacyHelperCleaner.paths + [marker] { #expect(exists(root, p)) }
+    }
 }

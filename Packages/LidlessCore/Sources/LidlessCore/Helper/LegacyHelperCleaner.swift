@@ -26,18 +26,43 @@ public struct LegacyHelperCleaner: Sendable {
 
     private static let markerName = "lid-mode.marker"
 
+    private func failure(_ what: String, _ path: String, _ code: Int32) -> HelperError {
+        .commandFailed("cannot \(what) \(path): \(String(cString: strerror(code)))")
+    }
+
     /// Opens the marker directory without following a symlink. The descriptor pins the
     /// directory, so a swap for a symlink during the slow commands cannot redirect the
-    /// marker steps. nil when there is no real directory.
-    private func openMarkerDirectory() -> Int32? {
-        let fd = open(fsPath(Self.markerDirectory), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
-        guard fd >= 0 else { return nil }
+    /// marker steps. nil when there is no real directory; any other failure throws, so an
+    /// unreadable directory is never mistaken for an absent marker.
+    private func openMarkerDirectory() throws -> Int32? {
+        let path = fsPath(Self.markerDirectory)
+        var fd: Int32
+        repeat { fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW) } while fd < 0 && errno == EINTR
+        guard fd >= 0 else {
+            let code = errno
+            if [ENOENT, ENOTDIR, ELOOP].contains(code) { return nil }
+            throw failure("open", path, code)
+        }
         var st = stat()
-        guard fstat(fd, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else {
+        guard fstat(fd, &st) == 0 else {
+            let code = errno
+            close(fd)
+            throw failure("stat", path, code)
+        }
+        guard (st.st_mode & S_IFMT) == S_IFDIR else {
             close(fd)
             return nil
         }
         return fd
+    }
+
+    /// Whether the marker entry exists in the pinned directory (a symlink counts).
+    private func markerExists(in dirFd: Int32) throws -> Bool {
+        var st = stat()
+        if fstatat(dirFd, Self.markerName, &st, AT_SYMLINK_NOFOLLOW) == 0 { return true }
+        let code = errno
+        if code == ENOENT { return false }
+        throw failure("stat", Self.markerFile, code)
     }
 
     /// lstat: a dangling symlink exists.
@@ -54,11 +79,10 @@ public struct LegacyHelperCleaner: Sendable {
     /// Returns the absolute paths of the files actually unlinked (the three legacy paths and
     /// the marker). The marker directory is removed too when empty, but is not reported.
     public func clean() throws -> [String] {
-        let dirFd = openMarkerDirectory()
+        let dirFd = try openMarkerDirectory()
         defer { if let dirFd { close(dirFd) } }
 
-        var st = stat()
-        if let dirFd, fstatat(dirFd, Self.markerName, &st, AT_SYMLINK_NOFOLLOW) == 0 {
+        if let dirFd, try markerExists(in: dirFd) {
             let result = try runner.run("/usr/bin/pmset", ["-a", "disablesleep", "0"])
             if result.exitCode != 0 { throw HelperError.commandFailed(result.stderr) }
         }
