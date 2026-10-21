@@ -70,6 +70,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let helper = HelperModel(backend: backend)
+        helper.lidModeHeld = { [weak controller] in controller?.session?.lidModeActive == true }
+        // Lid mode the user asked for while the helper waited for approval turns on now.
+        helper.onBecameInstalled = { [weak controller] in controller?.helperDidChange() }
         settingsWindow = SettingsWindowController(controller: controller, helper: helper)
         statusItem = StatusItemController(
             controller: controller,
@@ -77,11 +80,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openSettings: { [weak self] tab in self?.settingsWindow.show(tab: tab) }
         )
         // Order matters: undo a leftover lid mode, then take the first readings
-        // (engine.start() refreshes immediately), then start-on-launch sees them.
+        // (engine.start() refreshes immediately), then start-on-launch sees them. A 0.2.0
+        // helper left next to an approved daemon goes first: the daemon refuses to remove it
+        // while closed-lid mode is held.
         controller.recoverAtLaunch()
         engine.start()
-        controller.startOnLaunchIfEnabled()
-        statusItem.refresh()
+        helper.removeLegacyHelperAtLaunch { [weak controller, weak self] in
+            controller?.startOnLaunchIfEnabled()
+            self?.statusItem.refresh()
+        }
         // Checks the daemon's version once at launch.
         helper.refresh()
         #if DEBUG
@@ -116,6 +123,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Common modes: the session must end on time while a menu or an alert is open too.
         RunLoop.main.add(tick, forMode: .common)
         tickTimer = tick
+        // Back from System Settings: pick up the approval without waiting for the poll.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { helper.refresh() }
+        }
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -144,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-private extension Bundle {
+extension Bundle {
     var shortVersion: String {
         object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
     }

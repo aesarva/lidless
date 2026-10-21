@@ -11,31 +11,36 @@ struct HelperTab: View {
             Section {
                 LabeledContent("Status") {
                     switch helper.status {
-                    // Until the Task 7 UI: waiting for approval and unsigned read as not installed.
-                    case .notInstalled, .needsApproval, .unsigned: Text("Not installed")
-                    case .installed: Text("Installed")
+                    case .notInstalled: Text("Not set up")
+                    case .needsApproval: Text("Waiting for approval")
+                    case .installed: Text("Running, version \(Bundle.main.shortVersion)")
+                    case .unsigned: Text("Needs a signed build")
                     case .error(let message): Text("Error: \(message)").foregroundStyle(.red)
                     }
                 }
+                if helper.status == .needsApproval {
+                    Button("Open System Settings…") { helper.openSystemSettings() }
+                }
                 HStack {
-                    Button("Install…") {
-                        run({ await helper.install() }, onSuccess: { controller.helperDidChange() })
+                    Button("Set Up…") {
+                        // HelperModel.onBecameInstalled tells the controller once it is allowed.
+                        run { await helper.install() }
                     }
-                    Button("Uninstall…") {
-                        // Turn lid mode off while the helper can still do it; the setting stays
-                        // off, so nothing turns it back on while the uninstall runs.
-                        controller.setLidMode(false)
-                        run({ await helper.uninstall() }, onSuccess: { controller.helperDidChange() })
-                    }
+                    .disabled(helper.status == .installed || helper.status == .unsigned)
+                    Button("Remove") { remove() }
+                        .disabled(helper.status == .notInstalled || helper.status == .unsigned)
                     if helper.isWorking { ProgressView().controlSize(.small) }
                 }
                 .disabled(helper.isWorking)
+                if helper.legacyRemoved {
+                    Text("The 0.2.0 helper was removed.").font(.caption).foregroundStyle(.secondary)
+                }
                 if let errorText {
                     Text(errorText).foregroundStyle(.red).font(.caption)
                 }
             }
             Section {
-                Text("Closed-lid mode needs a one-time administrator password to allow Lidless to run exactly one command: pmset disablesleep. A background watchdog restores normal sleep if Lidless quits unexpectedly.")
+                Text("Closed-lid mode uses a small background helper that can do one thing: turn pmset disablesleep on and off. It accepts commands only from Lidless signed by the same developer, needs no password, and restores normal sleep the moment Lidless quits or crashes.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -45,7 +50,18 @@ struct HelperTab: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func run(_ work: @escaping () async -> HelperError?, onSuccess: @escaping () -> Void = {}) {
+    /// Turns lid mode off while the helper can still do it; the setting stays off, so nothing
+    /// turns it back on while the removal runs. If the removal fails, the setting comes back.
+    private func remove() {
+        let wasEnabled = controller.settings.lidModeEnabled
+        controller.setLidMode(false)
+        run({ await helper.uninstall() },
+            onSuccess: { controller.helperDidChange() },
+            onFailure: { if wasEnabled { controller.setLidMode(true) } })
+    }
+
+    private func run(_ work: @escaping () async -> HelperError?,
+                     onSuccess: @escaping () -> Void = {}, onFailure: @escaping () -> Void = {}) {
         errorText = nil
         Task {
             guard let error = await work() else {
@@ -53,6 +69,7 @@ struct HelperTab: View {
                 return
             }
             errorText = error.message
+            onFailure()
         }
     }
 }

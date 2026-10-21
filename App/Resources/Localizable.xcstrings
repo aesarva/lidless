@@ -144,16 +144,6 @@
         }
       }
     },
-    "Closed-lid mode needs a one-time administrator password to allow Lidless to run exactly one command: pmset disablesleep. A background watchdog restores normal sleep if Lidless quits unexpectedly.": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Для режима закрытой крышки один раз нужен пароль администратора, чтобы разрешить Lidless выполнять ровно одну команду: pmset disablesleep. Фоновый сторож вернёт обычный сон, если Lidless неожиданно завершится."
-          }
-        }
-      }
-    },
     "Closed-lid mode paused after %@ on battery": {
       "localizations": {
         "ru": {
@@ -180,6 +170,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Режим крышки недоступен — переустановите помощника в настройках"
+          }
+        }
+      }
+    },
+    "Closed-lid mode uses a small background helper that can do one thing: turn pmset disablesleep on and off. It accepts commands only from Lidless signed by the same developer, needs no password, and restores normal sleep the moment Lidless quits or crashes.": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Режим крышки использует небольшой фоновый помощник, который умеет одно: включать и выключать pmset disablesleep. Он принимает команды только от Lidless с той же подписью, не требует пароля и возвращает обычный сон, как только Lidless завершается или падает."
           }
         }
       }
@@ -304,26 +304,6 @@
         }
       }
     },
-    "Installed": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Установлен"
-          }
-        }
-      }
-    },
-    "Install…": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Установить…"
-          }
-        }
-      }
-    },
     "Keep Display On": {
       "localizations": {
         "ru": {
@@ -427,12 +407,22 @@
         }
       }
     },
-    "Not installed": {
+    "Needs a signed build": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Не установлен"
+            "value": "Нужна подписанная сборка"
+          }
+        }
+      }
+    },
+    "Not set up": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не настроен"
           }
         }
       }
@@ -467,6 +457,16 @@
         }
       }
     },
+    "Open System Settings…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Открыть Системные настройки…"
+          }
+        }
+      }
+    },
     "Presets": {
       "localizations": {
         "ru": {
@@ -497,6 +497,16 @@
         }
       }
     },
+    "Remove": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Удалить"
+          }
+        }
+      }
+    },
     "Remove preset": {
       "localizations": {
         "ru": {
@@ -513,6 +523,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Перезапустить Lidless"
+          }
+        }
+      }
+    },
+    "Running, version %@": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Работает, версия %@"
           }
         }
       }
@@ -543,6 +563,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Как в системе"
+          }
+        }
+      }
+    },
+    "Set Up…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Настроить…"
           }
         }
       }
@@ -637,6 +667,16 @@
         }
       }
     },
+    "The 0.2.0 helper was removed.": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Помощник 0.2.0 удалён."
+          }
+        }
+      }
+    },
     "Time left": {
       "localizations": {
         "ru": {
@@ -707,16 +747,6 @@
         }
       }
     },
-    "Uninstall…": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Удалить…"
-          }
-        }
-      }
-    },
     "Until…": {
       "localizations": {
         "ru": {
@@ -733,6 +763,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Версия %@"
+          }
+        }
+      }
+    },
+    "Waiting for approval": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ждёт разрешения"
+          }
+        }
+      }
+    },
+    "allow Lidless in System Settings → Login Items": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "разреши Lidless в Системных настройках → Объекты входа"
           }
         }
       }
@@ -760,12 +810,22 @@
     "github.com/aesarva/lidless": {
       "shouldTranslate": false
     },
-    "helper install failed: %@": {
+    "helper error: %@": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "помощник не установлен: %@"
+            "value": "ошибка помощника: %@"
+          }
+        }
+      }
+    },
+    "helper is off in System Settings": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "помощник выключен в Системных настройках"
           }
         }
       }
@@ -780,22 +840,22 @@
         }
       }
     },
-    "installing the helper…": {
+    "needs a one-time approval in System Settings": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "устанавливаю помощника…"
+            "value": "нужно один раз разрешить в Системных настройках"
           }
         }
       }
     },
-    "needs a one-time helper install": {
+    "needs a signed build": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "нужно один раз установить помощника"
+            "value": "нужна подписанная сборка"
           }
         }
       }

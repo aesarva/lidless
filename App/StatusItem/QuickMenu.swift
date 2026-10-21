@@ -5,7 +5,7 @@ import LidlessCore
 enum QuickMenu {
     static func build(
         controller: SessionController,
-        helperInstalled: Bool,
+        helperStatus: HelperStatus,
         helperBusy: Bool = false,
         onSettings: @escaping (SettingsTab) -> Void = { _ in }
     ) -> NSMenu {
@@ -30,16 +30,17 @@ enum QuickMenu {
 
         let lid = ActionItem(String(localized: "Closed-Lid Mode")) {
             let enabled = controller.settings.lidModeEnabled
-            // Without the helper, turning lid mode on would only fail: send the user to install it.
-            if !enabled && !helperInstalled {
+            // Without the helper, turning lid mode on would only fail: send the user to set it up.
+            if !enabled && helperStatus == .notInstalled {
                 onSettings(.helper)
             } else {
                 controller.setLidMode(!enabled)
             }
         }
         lid.state = controller.settings.lidModeEnabled ? .on : .off
-        // No lid-mode changes while the helper is being installed or removed.
-        lid.isEnabled = !helperBusy
+        // No lid-mode changes while the helper is being set up or removed, waits for the
+        // user's approval, or cannot run in this build.
+        lid.isEnabled = !helperBusy && helperStatus != .needsApproval && helperStatus != .unsigned
         menu.addItem(lid)
         menu.addItem(.separator())
 

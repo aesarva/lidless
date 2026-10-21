@@ -95,7 +95,15 @@ func previewReadings(battery: Int? = 82, onBattery: Bool = false, thermal: Therm
     return previewView(c)
 }
 
-#Preview("Needs helper") {
+#Preview("Helper not set up") {
     previewView(previewController(readings: previewReadings()), helper: .notInstalled)
+}
+
+#Preview("Helper needs approval") {
+    previewView(previewController(lid: true, readings: previewReadings()), helper: .needsApproval)
+}
+
+#Preview("Unsigned build") {
+    previewView(previewController(readings: previewReadings()), helper: .unsigned)
 }
 #endif

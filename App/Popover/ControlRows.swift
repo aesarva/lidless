@@ -62,12 +62,20 @@ struct LidRow: View {
     }
 
     private var detail: (String, Color) {
-        if helper.isWorking { return (String(localized: "installing the helper…"), Studio.inkDim) }
-        if let installError {
-            return (String(localized: "helper install failed: \(installError.message)"), Studio.caution)
+        if let installError, helper.status == .notInstalled {
+            return (String(localized: "helper error: \(installError.message)"), Studio.caution)
         }
-        if helper.status != .installed {
-            return (String(localized: "needs a one-time helper install"), Studio.caution)
+        switch helper.status {
+        case .notInstalled:
+            return (String(localized: "needs a one-time approval in System Settings"), Studio.caution)
+        case .needsApproval:
+            return (String(localized: "allow Lidless in System Settings → Login Items"), Studio.caution)
+        case .unsigned:
+            return (String(localized: "needs a signed build"), Studio.caution)
+        case .error where controller.settings.lidModeEnabled:
+            return (String(localized: "helper is off in System Settings"), Studio.caution)
+        case .installed, .error:
+            break
         }
         if let reason = suspended {
             switch reason {
@@ -92,28 +100,35 @@ struct LidRow: View {
             detail: detail.0,
             detailColor: detail.1,
             isOn: Binding(get: { isOn && suspended == nil }, set: { _ in Task { await tap() } }),
-            enabled: !helper.isWorking,
+            enabled: !helper.isWorking && helper.status != .unsigned,
             onAir: controller.session != nil
         )
     }
 
     private func tap() async {
-        if helper.status != .installed {
+        switch helper.status {
+        case .unsigned:
+            return
+        case .needsApproval:
+            helper.openSystemSettings()
+        case .notInstalled:
             guard !helper.isWorking else { return }
             installError = nil
-            let error = await helper.install()
-            if let error {
+            if let error = await helper.install() {
                 installError = error
                 return
             }
-            controller.helperDidChange()
+            // Wanted now, applied once the user allows the helper (HelperModel.onBecameInstalled).
             controller.setLidMode(true)
-        } else if suspended != nil {
-            controller.setLidMode(true)
-        } else {
-            // Decide on what the switch shows: after a failed disable the setting is off
-            // but lid mode is still active, and a tap must retry the disable.
-            controller.setLidMode(!isOn)
+        case .installed, .error:
+            installError = nil
+            if suspended != nil {
+                controller.setLidMode(true)
+            } else {
+                // Decide on what the switch shows: after a failed disable the setting is off
+                // but lid mode is still active, and a tap must retry the disable.
+                controller.setLidMode(!isOn)
+            }
         }
     }
 }
