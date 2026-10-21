@@ -37,8 +37,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lidControl = lid
         var settingsStore: SettingsStore = UserDefaultsSettingsStore()
         #if DEBUG
-        // Design-review runs never touch the real helper, marker or the user's settings:
-        // another Lidless may be running with lid mode on.
+        // Design-review runs never turn closed-lid mode on through the real helper or touch the
+        // user's settings: another Lidless may be running with lid mode on.
         if args["DebugStartSession"] != nil || args["CapturePanelTo"] != nil {
             lidControl = PreviewLid()
             let store = PreviewStore()

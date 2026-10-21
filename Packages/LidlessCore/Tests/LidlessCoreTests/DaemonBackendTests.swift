@@ -12,7 +12,8 @@ private func makeBackend(
 ) -> (DaemonBackend, FakeRegistration) {
     let registration = FakeRegistration(status: status)
     let backend = DaemonBackend(registration: registration, client: client, appVersion: appVersion,
-                                legacy: LegacyHelperCleaner(root: root, runner: FakeCommandRunner()))
+                                legacy: LegacyHelperCleaner(root: root, runner: FakeCommandRunner()),
+                                verifyDelay: 0)
     return (backend, registration)
 }
 
@@ -20,7 +21,8 @@ private func makeBackend(
     @Test func statusMapping() {
         #expect(makeBackend(.notRegistered).0.status() == .notInstalled)
         #expect(makeBackend(.requiresApproval).0.status() == .needsApproval)
-        if case .error = makeBackend(.notFound).0.status() {} else { Issue.record("notFound is not .error") }
+        // SMAppService may say notFound for a daemon that was never registered.
+        #expect(makeBackend(.notFound).0.status() == .notInstalled)
         #expect(makeBackend(.enabled, client: nil).0.status() == .unsigned)
         #expect(makeBackend(.notRegistered, client: nil).0.status() == .unsigned)
 
@@ -121,6 +123,9 @@ private func makeBackend(
         backend.refreshInfo()
         #expect(registration.unregisterCalls == 1)
         #expect(registration.registerCalls == 1)
+        // The first info() plus three checks of the replacement.
+        #expect(client.infoCalls == 4)
+        if case .error = backend.status() {} else { Issue.record("persistent mismatch is not .error") }
         backend.refreshInfo()
         #expect(registration.unregisterCalls == 1)
         #expect(registration.registerCalls == 1)
@@ -129,6 +134,88 @@ private func makeBackend(
         client.stubInfo = HelperInfo(version: "0.3.0", sleepDisabled: false)
         backend.refreshInfo()
         #expect(backend.status() == .installed)
+    }
+
+    @Test func reregistrationVerifiesTheReplacement() {
+        let client = FakeHelperClient()
+        let old = HelperInfo(version: "0.2.9", sleepDisabled: false)
+        client.infoScript = [.success(old), .failure(.commandFailed("connection interrupted"))]
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        backend.refreshInfo()
+        #expect(registration.registerCalls == 1)
+        #expect(client.infoCalls == 3)
+        #expect(backend.status() == .installed)
+    }
+
+    @Test func replacementThatNeverAnswersIsError() {
+        let client = FakeHelperClient()
+        client.infoScript = [.success(HelperInfo(version: "0.2.9", sleepDisabled: false))]
+        client.infoError = HelperError.commandFailed("no reply")
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        backend.refreshInfo()
+        #expect(registration.registerCalls == 1)
+        #expect(client.infoCalls == 4)
+        if case .error(let message) = backend.status() {
+            #expect(message.contains("no reply"))
+        } else {
+            Issue.record("unanswered replacement is not .error")
+        }
+    }
+
+    /// Re-registration paused inside register() while the user uninstalls from another
+    /// thread: the uninstall waits for it and wins.
+    @Test func uninstallDuringReregistrationWins() {
+        let client = FakeHelperClient()
+        client.stubInfo = HelperInfo(version: "0.2.9", sleepDisabled: false)
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        let started = DispatchSemaphore(value: 0)
+        let gate = DispatchSemaphore(value: 0)
+        registration.onRegister = {
+            started.signal()
+            gate.wait()
+        }
+        let refreshed = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            backend.refreshInfo()
+            refreshed.signal()
+        }
+        started.wait()
+        registration.onRegister = nil
+        let uninstalled = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            try? backend.uninstall()
+            uninstalled.signal()
+        }
+        let finishedEarly = uninstalled.wait(timeout: .now() + 0.2) == .success
+        #expect(!finishedEarly, "uninstall did not wait for the re-registration")
+        gate.signal()
+        refreshed.wait()
+        if !finishedEarly { uninstalled.wait() }
+        #expect(registration.stubStatus == .notRegistered)
+        #expect(registration.registerCalls == 1)
+        #expect(backend.status() == .notInstalled)
+    }
+
+    /// An uninstall between the mismatching info() and the re-registration stops it, even
+    /// if launchd still reports the daemon as enabled.
+    @Test func uninstallDisablesAutomaticReregistration() {
+        let client = FakeHelperClient()
+        client.stubInfo = HelperInfo(version: "0.2.9", sleepDisabled: false)
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        client.onInfo = {
+            client.onInfo = nil
+            try? backend.uninstall()
+            registration.stubStatus = .enabled
+        }
+        backend.refreshInfo()
+        #expect(registration.registerCalls == 0)
+        #expect(registration.unregisterCalls == 1)
+
+        // An explicit install allows it again.
+        try? backend.install()
+        #expect(registration.registerCalls == 1)
+        backend.refreshInfo()
+        #expect(registration.registerCalls == 2)
     }
 
     @Test func unsignedNeverTouchesRegistration() {

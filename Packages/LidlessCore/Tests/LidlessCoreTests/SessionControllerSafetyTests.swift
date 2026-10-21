@@ -257,6 +257,7 @@ struct SessionControllerSafetyTests {
         #expect(c.session?.lidModeEnabledAt == t0)
         #expect(notifier.posted.isEmpty)
         #expect(c.attention == nil)
+        #expect(lid.connectionLostCalls == 1)
     }
 
     @Test func connectionLostAndReenableFailsSuspendsOnce() {
@@ -285,10 +286,12 @@ struct SessionControllerSafetyTests {
         c.update(readings: readings())
         #expect(c.session?.lidModeActive == true)
         #expect(c.session?.lidModeSuspendedReason == nil)
-        #expect(c.session?.lidModeEnabledAt == clock.now)
+        // Automatic recovery keeps the battery time limit counting from the user's enable.
+        #expect(c.session?.lidModeEnabledAt == t0)
     }
 
-    @Test func pollRetryWaitsWhileSafetyWouldSuspend() {
+    /// A retry the safety rules would suspend right away becomes that suspension instead.
+    @Test func pollRetryTurnsIntoSafetySuspension() {
         startWithLid()
         lid.failEnable = true
         c.helperConnectionLost()
@@ -297,9 +300,35 @@ struct SessionControllerSafetyTests {
         c.update(readings: readings(thermal: .serious))
         #expect(lid.enableCalls == before)
         #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        #expect(c.attention == .thermal)
+        #expect(notifier.posted.contains(.lidModeSuspended(.thermal)))
         c.update(readings: readings())
-        #expect(lid.enableCalls == before + 1)
+        #expect(lid.enableCalls == before)
+    }
+
+    @Test func recoveryAfterBatteryLimitStaysSuspended() {
+        startWithLid()
+        lid.failEnable = true
+        c.helperConnectionLost()
+        lid.failEnable = false
+        clock.advance(240 * 60)
+        c.update(readings: readings(onBattery: true, lidClosed: true, since: t0))
+        #expect(lid.enableCalls == 2)
+        #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModeSuspendedReason == .lidOnBatteryLimit)
+    }
+
+    @Test func connectionLostWhileHotSuspendsForThermal() {
+        startWithLid()
+        lid.failDisable = true
+        c.update(readings: readings(thermal: .serious))
         #expect(c.session?.lidModeActive == true)
+        c.helperConnectionLost()
+        #expect(lid.enableCalls == 1)
+        #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        #expect(c.attention == .thermal)
     }
 
     @Test func pollDoesNotRetryOtherSuspensions() {
@@ -351,8 +380,18 @@ struct SessionControllerSafetyTests {
         lid.failDisable = true
         c.setLidMode(false)
         #expect(c.session?.lidModeActive == true)
+        #expect(c.attention == .helperUnavailable)
         c.helperConnectionLost()
         #expect(lid.enableCalls == 1)
+        #expect(lid.connectionLostCalls == 1)
+        #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModeSuspendedReason == nil)
+        #expect(c.attention == nil)
+
+        lid.failDisable = false
+        c.setLidMode(true)
+        #expect(lid.enableCalls == 2)
+        #expect(c.session?.lidModeActive == true)
     }
 
     @Test func helperDidChangeRetriesSuspendedLidMode() {

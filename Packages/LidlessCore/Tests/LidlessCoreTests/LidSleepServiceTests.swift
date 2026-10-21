@@ -40,6 +40,14 @@ struct LidSleepServiceTests {
         #expect(backend.setCalls == [true, false, false])
     }
 
+    /// The daemon let go when the connection dropped: nothing is left to turn off.
+    @Test func connectionLostForgetsTheEnable() throws {
+        try svc.enable()
+        svc.connectionLost()
+        try svc.disable()
+        #expect(backend.setCalls == [true])
+    }
+
     @Test func recoverIsNoop() {
         #expect(svc.recoverIfNeeded())
         #expect(backend.setCalls == [])

@@ -11,19 +11,28 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     private let client: HelperClient?
     private let appVersion: String
     private let legacy: LegacyHelperCleaner
+    /// Pause before each check of a re-registered daemon (it restarts first).
+    private let verifyDelay: TimeInterval
+    private static let verifyAttempts = 3
     private let log = Logger(subsystem: HelperIDs.app, category: "helper")
     private let lock = NSLock()
     /// What the last `refreshInfo()` found wrong with an enabled daemon; nil until one does.
     private var infoError: String?
     /// The once-per-launch re-registration after a version mismatch has been used.
     private var reregistered = false
+    /// The user removed the helper: no automatic re-registration until the next `install()`.
+    private var userRemoved = false
+    /// Held across every registration change (install, uninstall, unregister + register), so a
+    /// background re-registration can never undo the user's uninstall.
+    private let mutationLock = NSLock()
 
     public init(registration: HelperRegistration, client: HelperClient?, appVersion: String,
-                legacy: LegacyHelperCleaner = LegacyHelperCleaner()) {
+                legacy: LegacyHelperCleaner = LegacyHelperCleaner(), verifyDelay: TimeInterval = 1) {
         self.registration = registration
         self.client = client
         self.appVersion = appVersion
         self.legacy = legacy
+        self.verifyDelay = verifyDelay
     }
 
     /// Fires after the connection to the daemon dropped (timeout, idle exit, crash): whatever
@@ -36,9 +45,10 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     public func status() -> HelperStatus {
         guard client != nil else { return .unsigned }
         switch registration.status {
-        case .notRegistered: return .notInstalled
+        // SMAppService may report notFound for a daemon that was never registered; if the
+        // plist really is missing, install() reports the error.
+        case .notRegistered, .notFound: return .notInstalled
         case .requiresApproval: return .needsApproval
-        case .notFound: return .error("the helper is missing from the app bundle")
         case .enabled: return lock.withLock { infoError }.map { .error($0) } ?? .installed
         }
     }
@@ -46,40 +56,75 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     public func refreshInfo() {
         guard let client, registration.status == .enabled else { return }
         let problem: String?
-        do {
-            let info = try client.info()
-            problem = info.version == appVersion ? nil : versionMismatch(info.version)
-        } catch {
-            problem = HelperError.message(for: error)
+        switch check(client) {
+        case .ok: problem = nil
+        case .failed(let message): problem = message
+        case .mismatch(let message): problem = reregister(client, because: message)
         }
         if let problem { log.error("helper: \(problem, privacy: .public)") }
+        // Shown only while registered; install() and uninstall() clear it.
         lock.withLock { infoError = problem }
     }
 
-    /// A daemon left over from another app version (an in-place update): re-register once per
-    /// launch so launchd starts the bundled one. Unregistering sends the old daemon SIGTERM,
-    /// which interrupts the client's connection; the client drops it and the next call opens a
-    /// new one, so no explicit reconnect is needed here. Returns the problem left, if any.
-    private func versionMismatch(_ daemonVersion: String) -> String? {
-        let first = lock.withLock { () -> Bool in
-            defer { reregistered = true }
-            return !reregistered
-        }
-        let mismatch = "helper version \(daemonVersion) does not match Lidless \(appVersion)"
-        guard first else { return mismatch }
-        log.notice("\(mismatch, privacy: .public): re-registering")
+    private enum Check {
+        case ok
+        case mismatch(String)
+        case failed(String)
+    }
+
+    private func check(_ client: HelperClient) -> Check {
         do {
-            try registration.unregister()
-            try registration.register()
-            return nil
+            let info = try client.info()
+            if info.version == appVersion { return .ok }
+            return .mismatch("helper version \(info.version) does not match Lidless \(appVersion)")
         } catch {
-            return "\(mismatch); re-registering failed: \(error.localizedDescription)"
+            return .failed(HelperError.message(for: error))
         }
+    }
+
+    /// A daemon left over from another app version (an in-place update): re-register once per
+    /// launch so launchd starts the bundled one, then check the replacement. Unregistering
+    /// sends the old daemon SIGTERM, which interrupts the client's connection; the client
+    /// drops it and the next call opens a new one, so no explicit reconnect is needed.
+    /// Returns the problem left, if any.
+    private func reregister(_ client: HelperClient, because mismatch: String) -> String? {
+        // nil: re-registered; otherwise why not.
+        let refused: String? = mutationLock.withLock {
+            let allowed = lock.withLock { () -> Bool in
+                guard !userRemoved, !reregistered else { return false }
+                reregistered = true
+                return true
+            }
+            // The user's uninstall may have run between info() and here.
+            guard allowed, registration.status == .enabled else { return mismatch }
+            log.notice("\(mismatch, privacy: .public): re-registering")
+            do {
+                try registration.unregister()
+                try registration.register()
+                return nil
+            } catch {
+                return "\(mismatch); re-registering failed: \(error.localizedDescription)"
+            }
+        }
+        if let refused { return refused }
+        var problem = mismatch
+        for _ in 0..<Self.verifyAttempts {
+            if verifyDelay > 0 { Thread.sleep(forTimeInterval: verifyDelay) }
+            switch check(client) {
+            case .ok: return nil
+            case .mismatch(let message), .failed(let message): problem = "after re-registering: \(message)"
+            }
+        }
+        return problem
     }
 
     public func install() throws {
         guard client != nil else { throw HelperError.installFailed(Self.unsignedMessage) }
-        lock.withLock { infoError = nil }
+        mutationLock.lock(); defer { mutationLock.unlock() }
+        lock.withLock {
+            infoError = nil
+            userRemoved = false
+        }
         do {
             try registration.register()
         } catch {
@@ -94,7 +139,11 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     /// launchd sends the daemon SIGTERM; it returns sleep to normal itself.
     public func uninstall() throws {
         guard client != nil else { throw HelperError.installFailed(Self.unsignedMessage) }
-        lock.withLock { infoError = nil }
+        mutationLock.lock(); defer { mutationLock.unlock() }
+        lock.withLock {
+            infoError = nil
+            userRemoved = true
+        }
         guard registration.status != .notRegistered else { return }
         do {
             try registration.unregister()

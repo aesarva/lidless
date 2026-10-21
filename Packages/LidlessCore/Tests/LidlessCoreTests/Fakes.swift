@@ -76,8 +76,15 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
     private var _openSettingsCalls = 0
     private var _registerError: Error?
     private var _statusAfterRegister: RegistrationStatus?
+    private var _onRegister: (@Sendable () -> Void)?
 
     init(status: RegistrationStatus = .notRegistered) { _status = status }
+
+    /// Runs at the start of each `register()`, outside the lock (e.g. to pause it).
+    var onRegister: (@Sendable () -> Void)? {
+        get { lock.withLock { _onRegister } }
+        set { lock.withLock { _onRegister = newValue } }
+    }
 
     var stubStatus: RegistrationStatus {
         get { lock.withLock { _status } }
@@ -100,6 +107,7 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
     var status: RegistrationStatus { stubStatus }
 
     func register() throws {
+        onRegister?()
         lock.lock(); defer { lock.unlock() }
         _registerCalls += 1
         if let _registerError { throw _registerError }
@@ -125,6 +133,19 @@ final class FakeHelperClient: HelperClient, @unchecked Sendable {
     private var _infoCalls = 0
     private var _removeLegacyResult: Result<[String], HelperError> = .success([])
     private var _lostHandler: (@Sendable () -> Void)?
+    private var _infoScript: [Result<HelperInfo, HelperError>] = []
+    private var _onInfo: (@Sendable () -> Void)?
+
+    /// Answers for the next `info()` calls, in order; then `stubInfo` / `infoError` again.
+    var infoScript: [Result<HelperInfo, HelperError>] {
+        get { lock.withLock { _infoScript } }
+        set { lock.withLock { _infoScript = newValue } }
+    }
+    /// Runs at the start of each `info()`, outside the lock.
+    var onInfo: (@Sendable () -> Void)? {
+        get { lock.withLock { _onInfo } }
+        set { lock.withLock { _onInfo = newValue } }
+    }
 
     var stubInfo: HelperInfo {
         get { lock.withLock { _info } }
@@ -157,8 +178,10 @@ final class FakeHelperClient: HelperClient, @unchecked Sendable {
     }
 
     func info() throws -> HelperInfo {
+        onInfo?()
         lock.lock(); defer { lock.unlock() }
         _infoCalls += 1
+        if !_infoScript.isEmpty { return try _infoScript.removeFirst().get() }
         if let _infoError { throw _infoError }
         return _info
     }
@@ -206,6 +229,7 @@ struct FakeError: Error {}
     var enableCalls = 0
     var disableCalls = 0
     var recoverCalls = 0
+    var connectionLostCalls = 0
     var failEnable = false
     var failDisable = false
     var failRecover = false
@@ -223,6 +247,7 @@ struct FakeError: Error {}
         recoverCalls += 1
         return !failRecover
     }
+    func connectionLost() { connectionLostCalls += 1 }
 }
 
 @MainActor final class FakePower: PowerMonitoring {

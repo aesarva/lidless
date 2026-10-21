@@ -7,6 +7,8 @@ import Foundation
     /// Undoes a `disablesleep 1` left behind by an earlier run. Returns false when that failed
     /// (disablesleep may still be 1).
     @discardableResult func recoverIfNeeded() -> Bool
+    /// The connection to the daemon dropped, so the daemon released this app's hold.
+    func connectionLost()
 }
 
 @MainActor public final class LidSleepService: LidSleepControlling {
@@ -35,4 +37,9 @@ import Foundation
     /// connection goes away.
     @discardableResult
     public func recoverIfNeeded() -> Bool { true }
+
+    /// Nothing is left to turn off: a later `disable()` does not call the daemon.
+    public func connectionLost() {
+        enabledHere = false
+    }
 }

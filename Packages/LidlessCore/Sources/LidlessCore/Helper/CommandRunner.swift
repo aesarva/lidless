@@ -26,14 +26,14 @@ public enum CommandError: Error, Equatable {
 }
 
 public protocol CommandRunner: Sendable {
-    /// Runs a command and waits for it. `timeout: nil` waits as long as it takes
-    /// (an administrator password prompt); otherwise a slower command is killed.
+    /// Runs a command and waits for it. `timeout: nil` waits as long as it takes;
+    /// otherwise a slower command is killed.
     func run(_ executable: String, _ arguments: [String], timeout: TimeInterval?) throws -> CommandResult
 }
 
 public extension CommandRunner {
-    /// Non-interactive commands (sudo -n, pmset) finish in milliseconds; a hung one must not
-    /// hold the caller (often the main actor, with the safety checks) for good.
+    /// Non-interactive commands (pmset, launchctl) finish in milliseconds; a hung one must not
+    /// hold the caller (a daemon XPC queue holding the SleepGuard lock) for good.
     static var defaultTimeout: TimeInterval { 15 }
 
     func run(_ executable: String, _ arguments: [String]) throws -> CommandResult {

@@ -25,6 +25,7 @@ import LidlessCore
     func enable() throws {}
     func disable() throws {}
     func recoverIfNeeded() -> Bool { true }
+    func connectionLost() {}
 }
 
 final class PreviewBackend: PrivilegedBackend {
