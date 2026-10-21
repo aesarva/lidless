@@ -1,5 +1,6 @@
 import AppKit
 import LidlessCore
+import os
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -107,6 +108,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Common modes: the session must end on time while a menu or an alert is open too.
         RunLoop.main.add(tick, forMode: .common)
         tickTimer = tick
+        // TEMP: probe, removed in Task 6
+        if ProcessInfo.processInfo.environment["LIDLESS_HELPER_PROBE"] == "1" {
+            DispatchQueue.global().async { Self.probeHelper() }
+        }
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -114,6 +119,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.engine.refresh()
                 self?.controller.tick()
             }
+        }
+    }
+
+    // TEMP: probe, removed in Task 6
+    /// Signed build: registers the daemon and asks it for `info`. Unsigned (ad-hoc) build:
+    /// skips registration (it is per bundle path) and calls the already registered daemon,
+    /// which must refuse it.
+    nonisolated private static func probeHelper() {
+        let log = Logger(subsystem: "io.github.aesarva.Lidless", category: "helper")
+        let teamID = CodeSigningRequirement.ownTeamID()
+        if teamID != nil {
+            let registration = SMAppServiceRegistration()
+            do {
+                try registration.register()
+            } catch {
+                log.error("probe: register failed: \(error.localizedDescription, privacy: .public)")
+            }
+            let status = registration.status
+            log.notice("probe: status \(String(describing: status), privacy: .public)")
+            if status == .requiresApproval { registration.openSystemSettings() }
+            guard status == .enabled else { return }
+        } else {
+            log.notice("probe: no Team ID, skipping registration")
+        }
+        let requirement = CodeSigningRequirement.requirement(identifier: HelperIDs.helper, teamID: teamID)
+            ?? #"identifier "\#(HelperIDs.helper)""#
+        do {
+            let info = try XPCHelperClient(requirement: requirement).info()
+            log.notice("probe: info version \(info.version, privacy: .public) disablesleep \(info.sleepDisabled, privacy: .public)")
+        } catch {
+            log.error("probe: info failed: \(String(describing: error), privacy: .public)")
         }
     }
 
