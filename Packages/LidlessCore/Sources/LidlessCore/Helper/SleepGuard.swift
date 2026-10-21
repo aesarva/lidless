@@ -126,9 +126,11 @@ public final class SleepGuard: @unchecked Sendable {
     }
 
     /// Closes the guard if nothing is held or pending; returns whether it did (then the daemon
-    /// may exit without leaving anything behind).
+    /// may exit without leaving anything behind). Never waits: while another call holds the
+    /// lock (it may be inside pmset for seconds) it returns false and the caller tries later.
     public func shutdownIfIdle() -> Bool {
-        lock.lock(); defer { lock.unlock() }
+        guard lock.try() else { return false }
+        defer { lock.unlock() }
         guard holders.isEmpty, marker == .none else { return false }
         closed = true
         return true

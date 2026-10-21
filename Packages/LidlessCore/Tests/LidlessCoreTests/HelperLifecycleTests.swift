@@ -17,6 +17,10 @@ private final class ManualScheduler: HelperScheduler, @unchecked Sendable {
     private let lock = NSLock()
     private var now: TimeInterval = 0
     private var tasks: [Task] = []
+    /// Cancelled work still runs, like a timer that fired just before its cancel.
+    let ignoresCancel: Bool
+
+    init(ignoresCancel: Bool = false) { self.ignoresCancel = ignoresCancel }
 
     func schedule(after delay: TimeInterval, _ work: @escaping @Sendable () -> Void) -> HelperCancellable {
         lock.withLock {
@@ -35,7 +39,7 @@ private final class ManualScheduler: HelperScheduler, @unchecked Sendable {
         let end = lock.withLock { now + seconds }
         while true {
             let next: Task? = lock.withLock {
-                tasks.removeAll { $0.cancelled }
+                if !ignoresCancel { tasks.removeAll { $0.cancelled } }
                 guard let task = tasks.filter({ $0.due <= end }).min(by: { $0.due < $1.due }) else { return nil }
                 tasks.removeAll { $0 === task }
                 now = task.due
@@ -58,12 +62,12 @@ private final class ExitRecorder: @unchecked Sendable {
 @Suite struct HelperLifecycleTests {
     private let a = UUID()
 
-    private func make(initial: Bool = false, file: Bool = false)
+    private func make(initial: Bool = false, file: Bool = false, ignoresCancel: Bool = false)
         -> (HelperLifecycle, SleepGuard, FakeSleepSetting, ManualScheduler, ExitRecorder) {
         let store = MemoryOwnershipStore(exists: file)
         let setting = FakeSleepSetting(initial: initial, store: store)
         let guardian = SleepGuard(setting: setting, store: store)
-        let scheduler = ManualScheduler()
+        let scheduler = ManualScheduler(ignoresCancel: ignoresCancel)
         let exits = ExitRecorder()
         let lifecycle = HelperLifecycle(guard: guardian, scheduler: scheduler) { exits.record() }
         return (lifecycle, guardian, setting, scheduler, exits)
@@ -160,6 +164,85 @@ private final class ExitRecorder: @unchecked Sendable {
         scheduler.advance(by: 1)
         #expect(setting.writes == [false])
         scheduler.advance(by: 10)
+        #expect(exits.count == 1)
+    }
+
+    @Test func busyGuardDoesNotBlockActivation() throws {
+        let (lifecycle, guardian, setting, scheduler, exits) = make()
+        lifecycle.reevaluate()
+        // A late message from a closed connection: an acquire inside pmset at zero connections.
+        let block = setting.blockNextWrite()
+        let holder = a
+        let acquired = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            try? guardian.acquire(holder)
+            acquired.signal()
+        }
+        block.started.wait()
+        let fired = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            scheduler.advance(by: 10)
+            fired.signal()
+        }
+        // Old behaviour: the idle fire waits for the guard lock inside the lifecycle queue.
+        let firedInTime = fired.wait(timeout: .now() + 1) == .success
+        #expect(firedInTime)
+        guard firedInTime else {
+            block.gate.signal()
+            return
+        }
+        let start = Date()
+        #expect(lifecycle.connectionWillActivate())
+        #expect(Date().timeIntervalSince(start) < 0.5)
+        #expect(exits.count == 0)
+        block.gate.signal()
+        #expect(acquired.wait(timeout: .now() + 2) == .success)
+        lifecycle.connectionDidClose(holder: holder)
+        #expect(setting.writes == [true, false])
+        scheduler.advance(by: 10)
+        #expect(exits.count == 1)
+    }
+
+    @Test func busyGuardReArmsIdleTimer() throws {
+        let (lifecycle, guardian, setting, scheduler, exits) = make()
+        lifecycle.reevaluate()
+        let block = setting.blockNextWrite()
+        let holder = a
+        let acquired = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            try? guardian.acquire(holder)
+            acquired.signal()
+        }
+        block.started.wait()
+        let fired = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            scheduler.advance(by: 10)
+            fired.signal()
+        }
+        let firedInTime = fired.wait(timeout: .now() + 1) == .success
+        #expect(firedInTime)
+        guard firedInTime else {
+            block.gate.signal()
+            return
+        }
+        #expect(exits.count == 0)
+        #expect(scheduler.pendingDelays == [10])
+        block.gate.signal()
+        #expect(acquired.wait(timeout: .now() + 2) == .success)
+        try guardian.release(holder)
+        scheduler.advance(by: 10)
+        #expect(exits.count == 1)
+    }
+
+    @Test func staleIdleFireDoesNotExit() {
+        let (lifecycle, _, _, scheduler, exits) = make(ignoresCancel: true)
+        lifecycle.reevaluate() // timer 1, due at 10
+        scheduler.advance(by: 5)
+        #expect(lifecycle.connectionWillActivate()) // cancels timer 1 (ignored by the scheduler)
+        lifecycle.connectionDidClose(holder: a) // timer 2, due at 15
+        scheduler.advance(by: 5) // timer 1 fires anyway
+        #expect(exits.count == 0)
+        scheduler.advance(by: 5)
         #expect(exits.count == 1)
     }
 

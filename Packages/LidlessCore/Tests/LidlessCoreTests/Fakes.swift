@@ -208,8 +208,18 @@ final class FakeSleepSetting: SleepSetting, @unchecked Sendable {
     private var _failWriteOne = false
     private var _applyFailedWriteOne = false
     private var _failWriteZeroTimes = 0
+    private var _block: (started: DispatchSemaphore, gate: DispatchSemaphore)?
 
     init(initial: Bool, store: MemoryOwnershipStore) { _value = initial; self.store = store }
+
+    /// The next write signals `started`, then waits for `gate` (a slow pmset). The caller
+    /// (SleepGuard) holds its own lock all the while.
+    func blockNextWrite() -> (started: DispatchSemaphore, gate: DispatchSemaphore) {
+        let block = (started: DispatchSemaphore(value: 0), gate: DispatchSemaphore(value: 0))
+        lock.lock(); defer { lock.unlock() }
+        _block = block
+        return block
+    }
 
     var fileExistedAtAttempt: [Bool] { lock.lock(); defer { lock.unlock() }; return _fileExistedAtAttempt }
     var value: Bool {
@@ -243,6 +253,14 @@ final class FakeSleepSetting: SleepSetting, @unchecked Sendable {
     }
 
     func setDisabled(_ disabled: Bool) throws {
+        let block = lock.withLock { () -> (started: DispatchSemaphore, gate: DispatchSemaphore)? in
+            defer { _block = nil }
+            return _block
+        }
+        if let block {
+            block.started.signal()
+            block.gate.wait()
+        }
         lock.lock(); defer { lock.unlock() }
         _fileExistedAtAttempt.append(store.exists())
         if disabled, _failWriteOne {

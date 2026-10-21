@@ -31,9 +31,10 @@ public final class DispatchHelperScheduler: HelperScheduler {
 /// When the daemon may exit, and when to retry a failed `disablesleep` reset.
 ///
 /// The connection count, timers and the exit decision live on one serial queue, which never
-/// waits for pmset: SleepGuard is read and retried on the caller's thread (an XPC or timer
-/// queue), and only `shutdownIfIdle`, which does not run pmset, is called on the queue.
-/// So the listener delegate can call `connectionWillActivate()` synchronously.
+/// waits for the SleepGuard lock (held across pmset and launchctl): SleepGuard is read and
+/// retried on the caller's thread (an XPC or timer queue), and the only call made on the queue,
+/// `shutdownIfIdle`, is a try-lock. So the listener delegate can call
+/// `connectionWillActivate()` synchronously.
 public final class HelperLifecycle: @unchecked Sendable {
     public static let idleDelay: TimeInterval = 10
     public static let retryInterval: TimeInterval = 15
@@ -141,8 +142,14 @@ public final class HelperLifecycle: @unchecked Sendable {
         let shouldExit = queue.sync { () -> Bool in
             guard idleTimer?.id == id, !exiting else { return false }
             idleTimer = nil
-            // Closing the guard makes the decision final: a late acquire now throws.
-            guard connections == 0, sleepGuard.shutdownIfIdle() else { return false }
+            guard connections == 0 else { return false }
+            // Closing the guard makes the decision final: a late acquire now throws. Busy (a
+            // late message or cleanup in progress) or no longer idle: look again in 10 s; the
+            // guard call's own reevaluate cancels this timer if it leaves something held.
+            guard sleepGuard.shutdownIfIdle() else {
+                startIdleTimer()
+                return false
+            }
             exiting = true
             cancelRetryTimer()
             return true
@@ -150,8 +157,6 @@ public final class HelperLifecycle: @unchecked Sendable {
         if shouldExit {
             Self.log.notice("idle, exiting")
             exit()
-        } else {
-            reevaluate()
         }
     }
 
