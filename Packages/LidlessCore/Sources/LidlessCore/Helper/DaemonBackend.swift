@@ -111,7 +111,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
             log.notice("\(mismatch, privacy: .public): re-registering")
             do {
                 try registration.unregister()
-                try registration.register()
+                try registerAfterUnregister()
                 return nil
             } catch {
                 return "\(mismatch); re-registering failed: \(error.localizedDescription)"
@@ -127,6 +127,18 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
             }
         }
         return problem
+    }
+
+    /// register() right after unregister() fails with EPERM while launchd is still removing
+    /// the old job: try up to `verifyAttempts` times, pausing in between.
+    private func registerAfterUnregister() throws {
+        for attempt in 1... {
+            do {
+                return try registration.register()
+            } catch where attempt < Self.verifyAttempts {
+                if verifyDelay > 0 { Thread.sleep(forTimeInterval: verifyDelay) }
+            }
+        }
     }
 
     public func install() throws {

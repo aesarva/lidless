@@ -155,6 +155,33 @@ private func makeBackend(
         if case .error = backend.status() {} else { Issue.record("second rejection is not .error") }
     }
 
+    /// register() right after unregister() fails with EPERM while launchd is still removing
+    /// the old job: retried after a pause.
+    @Test func reregistrationRetriesRegisterWhileLaunchdCatchesUp() {
+        let client = FakeHelperClient()
+        client.infoScript = [.success(HelperInfo(version: "0.2.9", sleepDisabled: false))]
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        registration.registerError = RegisterError()
+        registration.onRegister = { [registration] in
+            if registration.registerCalls == 1 { registration.registerError = nil }
+        }
+        backend.refreshInfo()
+        #expect(registration.unregisterCalls == 1)
+        #expect(registration.registerCalls == 2)
+        #expect(backend.status() == .installed)
+    }
+
+    @Test func reregistrationGivesUpAfterThreeRegisterFailures() {
+        let client = FakeHelperClient()
+        client.stubInfo = HelperInfo(version: "0.2.9", sleepDisabled: false)
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        registration.registerError = RegisterError()
+        backend.refreshInfo()
+        #expect(registration.registerCalls == 3)
+        // Unregistered and not registered again: the user can install it from the app.
+        #expect(backend.status() == .notInstalled)
+    }
+
     @Test func reregistrationVerifiesTheReplacement() {
         let client = FakeHelperClient()
         let old = HelperInfo(version: "0.2.9", sleepDisabled: false)
