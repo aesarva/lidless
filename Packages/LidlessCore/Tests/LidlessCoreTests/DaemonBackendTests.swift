@@ -137,6 +137,24 @@ private func makeBackend(
         #expect(backend.status() == .installed)
     }
 
+    /// A daemon from another build can be unable to even decode info(): it drops the
+    /// connection. Re-register once, as for a version mismatch.
+    @Test func rejectedInfoReregistersOnce() {
+        let client = FakeHelperClient()
+        client.infoScript = [.failure(.rejected("Couldn’t communicate with a helper application."))]
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        backend.refreshInfo()
+        #expect(registration.unregisterCalls == 1)
+        #expect(registration.registerCalls == 1)
+        #expect(client.infoCalls == 2)
+        #expect(backend.status() == .installed)
+
+        client.infoScript = [.failure(.rejected("Couldn’t communicate with a helper application."))]
+        backend.refreshInfo()
+        #expect(registration.registerCalls == 1)
+        if case .error = backend.status() {} else { Issue.record("second rejection is not .error") }
+    }
+
     @Test func reregistrationVerifiesTheReplacement() {
         let client = FakeHelperClient()
         let old = HelperInfo(version: "0.2.9", sleepDisabled: false)

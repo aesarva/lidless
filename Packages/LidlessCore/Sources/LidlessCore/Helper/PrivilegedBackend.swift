@@ -15,13 +15,17 @@ public enum HelperStatus: Equatable, Sendable {
 public enum HelperError: Error, Equatable {
     case commandFailed(String)
     case installFailed(String)
+    /// The connection dropped with the call unanswered: the daemon refused this app's
+    /// signature, could not decode the call (a daemon from another build), is not reachable
+    /// or exited mid-call.
+    case rejected(String)
 }
 
 public extension HelperError {
     /// The text alone, without the case name: XPC replies carry it and the client wraps it again.
     var message: String {
         switch self {
-        case .commandFailed(let text), .installFailed(let text): text.isEmpty ? "command failed" : text
+        case .commandFailed(let text), .installFailed(let text), .rejected(let text): text.isEmpty ? "command failed" : text
         }
     }
 

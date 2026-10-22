@@ -63,9 +63,28 @@ private final class TestService: NSObject, HelperProtocol, @unchecked Sendable {
     }
 }
 
+/// The interface of an older daemon: same selector, a reply block with another signature.
+@objc private protocol OldHelperProtocol {
+    func info(reply: @escaping @Sendable (String) -> Void)
+}
+
+private final class OldService: NSObject, OldHelperProtocol {
+    func info(reply: @escaping @Sendable (String) -> Void) { reply("0.2.0") }
+}
+
+/// What the listener does with a new connection.
+private enum Serving {
+    case current
+    /// Exports `OldHelperProtocol`: a daemon left over from an older build.
+    case old
+    /// Refuses the connection, as a daemon does when the code-signing check fails.
+    case refuse
+}
+
 /// Anonymous listener exporting a `TestService`; counts the connections the client makes.
 private final class Harness: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
     let service = TestService()
+    private let serving: Serving
     private let listener = NSXPCListener.anonymous()
     private let lock = NSLock()
     private var made = 0
@@ -82,7 +101,8 @@ private final class Harness: NSObject, NSXPCListenerDelegate, @unchecked Sendabl
         connections.forEach { $0.invalidate() }
     }
 
-    override init() {
+    init(serving: Serving = .current) {
+        self.serving = serving
         super.init()
         listener.delegate = self
         listener.resume()
@@ -94,8 +114,16 @@ private final class Harness: NSObject, NSXPCListenerDelegate, @unchecked Sendabl
     }
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
-        connection.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
-        connection.exportedObject = service
+        switch serving {
+        case .refuse:
+            return false
+        case .old:
+            connection.exportedInterface = NSXPCInterface(with: OldHelperProtocol.self)
+            connection.exportedObject = OldService()
+        case .current:
+            connection.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
+            connection.exportedObject = service
+        }
         lock.withLock { accepted.append(connection) }
         connection.resume()
         return true
@@ -148,6 +176,30 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         let client = harness.makeClient()
         #expect(try client.info() == HelperInfo(version: "1.0", sleepDisabled: true))
         #expect(try client.removeLegacyHelper() == ["/a"])
+    }
+
+    /// A daemon from another build cannot decode the call and drops the connection: that
+    /// is `.rejected`, which tells the backend to re-register, unlike a timeout.
+    @Test func olderDaemonInterfaceIsRejected() {
+        let harness = Harness(serving: .old)
+        let client = harness.makeClient()
+        #expect {
+            try client.info()
+        } throws: { error in
+            if case .rejected = error as? HelperError { return true }
+            return false
+        }
+    }
+
+    @Test func refusedConnectionIsRejected() {
+        let harness = Harness(serving: .refuse)
+        let client = harness.makeClient()
+        #expect {
+            try client.info()
+        } throws: { error in
+            if case .rejected = error as? HelperError { return true }
+            return false
+        }
     }
 
     @Test func errorStringInReplyThrows() {

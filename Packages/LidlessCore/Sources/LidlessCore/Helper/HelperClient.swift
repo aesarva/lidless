@@ -10,7 +10,8 @@ public struct HelperInfo: Equatable, Sendable {
     }
 }
 
-/// Synchronous calls to the privileged daemon. Errors are `HelperError.commandFailed`.
+/// Synchronous calls to the privileged daemon. Errors are `HelperError.rejected` when the
+/// daemon dropped the connection unanswered, otherwise `HelperError.commandFailed`.
 /// Connections are numbered (generations, increasing from 1): the daemon ties a hold to the
 /// connection that took it and releases it when that connection closes.
 public protocol HelperClient: AnyObject, Sendable {
@@ -148,7 +149,13 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
         }
         DispatchQueue.global(qos: .userInitiated).async {
             let proxy = c.synchronousRemoteObjectProxyWithErrorHandler { error in
-                finish(.failure(.commandFailed(error.localizedDescription)))
+                // Interrupted or invalid with the call unanswered: a daemon from another build
+                // that cannot decode it cancels the connection, which arrives as either.
+                let nsError = error as NSError
+                let rejected = nsError.domain == NSCocoaErrorDomain
+                    && [NSXPCConnectionInterrupted, NSXPCConnectionInvalid].contains(nsError.code)
+                let message = error.localizedDescription
+                finish(.failure(rejected ? .rejected(message) : .commandFailed(message)))
             }
             guard let helper = proxy as? HelperProtocol else {
                 finish(.failure(.commandFailed("unexpected XPC proxy")))

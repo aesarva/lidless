@@ -83,13 +83,18 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
             let info = try client.info()
             if info.version == appVersion { return .ok }
             return .mismatch("helper version \(info.version) does not match Lidless \(appVersion)")
+        } catch HelperError.rejected(let message) {
+            // An enabled daemon that drops the connection unanswered is most likely one from
+            // another build whose interface differs: re-registering replaces it.
+            return .mismatch("helper dropped the connection: \(message)")
         } catch {
             return .failed(HelperError.message(for: error))
         }
     }
 
-    /// A daemon left over from another app version (an in-place update): re-register once per
-    /// launch so launchd starts the bundled one, then check the replacement. Unregistering
+    /// A daemon left over from another app version (an in-place update) or one that drops the
+    /// connection unanswered: re-register once per launch so launchd starts the bundled one,
+    /// then check the replacement. Unregistering
     /// sends the old daemon SIGTERM, which interrupts the client's connection; the client
     /// drops it and the next call opens a new one, so no explicit reconnect is needed.
     /// Returns the problem left, if any.
