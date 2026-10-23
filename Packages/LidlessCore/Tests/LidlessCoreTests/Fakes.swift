@@ -124,6 +124,8 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
     private var _registerError: Error?
     private var _statusAfterRegister: RegistrationStatus?
     private var _onRegister: (@Sendable () -> Void)?
+    private var _calls: [String] = []
+    private var _unregisterHangs = false
 
     init(status: RegistrationStatus = .notRegistered) { _status = status }
 
@@ -147,7 +149,16 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
         get { lock.withLock { _statusAfterRegister } }
         set { lock.withLock { _statusAfterRegister = newValue } }
     }
+    /// The unconfirmed `unregister` handler never fires: `unregisterAndWait` times out and
+    /// the daemon stays registered, until this is cleared.
+    var unregisterHangs: Bool {
+        get { lock.withLock { _unregisterHangs } }
+        set { lock.withLock { _unregisterHangs = newValue } }
+    }
+    /// "register", "unregister" and "unregisterAndWait", in call order.
+    var calls: [String] { lock.withLock { _calls } }
     var registerCalls: Int { lock.withLock { _registerCalls } }
+    /// Both `unregister()` and `unregisterAndWait(timeout:)` that took effect.
     var unregisterCalls: Int { lock.withLock { _unregisterCalls } }
     var openSettingsCalls: Int { lock.withLock { _openSettingsCalls } }
 
@@ -157,12 +168,23 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
         onRegister?()
         lock.lock(); defer { lock.unlock() }
         _registerCalls += 1
+        _calls.append("register")
         if let _registerError { throw _registerError }
         _status = _statusAfterRegister ?? .enabled
     }
 
     func unregister() throws {
         lock.withLock {
+            _unregisterCalls += 1
+            _calls.append("unregister")
+            _status = .notRegistered
+        }
+    }
+
+    func unregisterAndWait(timeout: TimeInterval) throws {
+        try lock.withLock {
+            _calls.append("unregisterAndWait")
+            if _unregisterHangs { throw HelperError.installFailed("unregister timed out") }
             _unregisterCalls += 1
             _status = .notRegistered
         }

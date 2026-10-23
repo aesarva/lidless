@@ -13,7 +13,7 @@ private func makeBackend(
     let registration = FakeRegistration(status: status)
     let backend = DaemonBackend(registration: registration, client: client, appVersion: appVersion,
                                 legacy: LegacyHelperCleaner(root: root, runner: FakeCommandRunner()),
-                                verifyDelay: 0)
+                                verifyDelay: 0, unregisterWait: 0)
     return (backend, registration)
 }
 
@@ -194,14 +194,77 @@ private func makeBackend(
         #expect(backend.status() == .installed)
     }
 
-    @Test func reregistrationGivesUpAfterThreeRegisterFailures() {
+    /// register() only after launchd confirmed the old daemon is gone (the completion handler).
+    @Test func reregisterWaitsForUnregisterCompletion() {
+        let client = FakeHelperClient()
+        client.infoScript = [.success(HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false))]
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        backend.refreshInfo()
+        #expect(registration.calls == ["unregisterAndWait", "register"])
+        #expect(backend.status() == .installed)
+    }
+
+    /// Three register() failures leave the re-registration pending: shown as an error, and
+    /// the next refresh registers again, without another unregister.
+    @Test func failedReregistrationIsRetriedOnNextRefresh() {
         let client = FakeHelperClient()
         client.stubInfo = HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)
         let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
         registration.registerError = RegisterError()
         backend.refreshInfo()
         #expect(registration.registerCalls == 3)
-        // Unregistered and not registered again: the user can install it from the app.
+        if case .error(let message) = backend.status() {
+            #expect(message.contains("Operation not permitted"))
+        } else {
+            Issue.record("failed re-registration is not .error")
+        }
+
+        registration.registerError = nil
+        client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
+        backend.refreshInfo()
+        #expect(registration.calls == ["unregisterAndWait", "register", "register", "register", "register"])
+        #expect(backend.status() == .installed)
+
+        // Done: a later mismatch is not re-registered again in this launch.
+        client.stubInfo = HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)
+        backend.refreshInfo()
+        #expect(registration.registerCalls == 4)
+    }
+
+    /// An unconfirmed unregister never leads to register(); the next refresh waits again.
+    @Test func unregisterTimeoutNeverRegisters() {
+        let client = FakeHelperClient()
+        client.stubInfo = HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        registration.unregisterHangs = true
+        backend.refreshInfo()
+        backend.refreshInfo()
+        #expect(registration.calls == ["unregisterAndWait", "unregisterAndWait"])
+        if case .error(let message) = backend.status() {
+            #expect(message.contains("unregister timed out"))
+        } else {
+            Issue.record("unconfirmed unregister is not .error")
+        }
+
+        registration.unregisterHangs = false
+        client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
+        backend.refreshInfo()
+        #expect(registration.calls == ["unregisterAndWait", "unregisterAndWait", "unregisterAndWait", "register"])
+        #expect(backend.status() == .installed)
+    }
+
+    /// The user's uninstall cancels a pending re-registration.
+    @Test func uninstallCancelsPendingReregistration() throws {
+        let client = FakeHelperClient()
+        client.stubInfo = HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        registration.registerError = RegisterError()
+        backend.refreshInfo()
+        registration.stubStatus = .enabled
+        try backend.uninstall()
+        registration.registerError = nil
+        backend.refreshInfo()
+        #expect(registration.registerCalls == 3)
         #expect(backend.status() == .notInstalled)
     }
 

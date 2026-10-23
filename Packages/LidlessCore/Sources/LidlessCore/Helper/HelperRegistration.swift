@@ -1,4 +1,5 @@
 import Foundation
+import os
 import ServiceManagement
 
 public enum RegistrationStatus: Equatable, Sendable {
@@ -13,6 +14,9 @@ public protocol HelperRegistration: Sendable {
     var status: RegistrationStatus { get }
     func register() throws
     func unregister() throws
+    /// Returns once launchd confirms the daemon is gone (the completion handler); throws when
+    /// it does not within `timeout`, or reports an error.
+    func unregisterAndWait(timeout: TimeInterval) throws
     func openSystemSettings()
 }
 
@@ -43,6 +47,19 @@ public struct SMAppServiceRegistration: HelperRegistration {
 
     public func unregister() throws {
         try service.unregister()
+    }
+
+    public func unregisterAndWait(timeout: TimeInterval) throws {
+        let done = DispatchSemaphore(value: 0)
+        let result = OSAllocatedUnfairLock<Error?>(initialState: nil)
+        service.unregister { error in
+            result.withLock { $0 = error }
+            done.signal()
+        }
+        guard done.wait(timeout: .now() + timeout) == .success else {
+            throw HelperError.installFailed("unregister timed out")
+        }
+        if let error = result.withLock({ $0 }) { throw error }
     }
 
     public func openSystemSettings() {

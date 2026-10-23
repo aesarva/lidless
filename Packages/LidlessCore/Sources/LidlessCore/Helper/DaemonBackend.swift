@@ -14,12 +14,18 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     /// Pause before each check of a re-registered daemon (it restarts first).
     private let verifyDelay: TimeInterval
     private static let verifyAttempts = 3
+    /// How long a re-registration waits for launchd to confirm the old daemon is gone.
+    private let unregisterWait: TimeInterval
     private let log = Logger(subsystem: HelperIDs.app, category: "helper")
     private let lock = NSLock()
     /// What the last `refreshInfo()` found wrong with an enabled daemon; nil until one does.
     private var infoError: String?
-    /// The once-per-launch re-registration of a daemon that failed a check has been used.
-    private var reregistered = false
+    /// Where the once-per-launch re-registration of a daemon that failed a check stands. A
+    /// step that failed is retried by the next `refreshInfo()`, not forbidden for the launch.
+    private enum Reregistration { case none, unregisterPending, registerPending, done }
+    private var reregistration = Reregistration.none
+    /// Why the pending re-registration began (the failed check).
+    private var reregistrationReason = ""
     /// The user removed the helper: no automatic re-registration until the next `install()`.
     private var userRemoved = false
     /// Bumped by install() and uninstall(): a refresh that began before one does not report.
@@ -29,12 +35,14 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     private let mutationLock = NSLock()
 
     public init(registration: HelperRegistration, client: HelperClient?, appVersion: String,
-                legacy: LegacyHelperCleaner = LegacyHelperCleaner(), verifyDelay: TimeInterval = 1) {
+                legacy: LegacyHelperCleaner = LegacyHelperCleaner(), verifyDelay: TimeInterval = 1,
+                unregisterWait: TimeInterval = 10) {
         self.registration = registration
         self.client = client
         self.appVersion = appVersion
         self.legacy = legacy
         self.verifyDelay = verifyDelay
+        self.unregisterWait = unregisterWait
     }
 
     /// Fires with a connection's generation after it dropped (timeout, idle exit, crash): what
@@ -49,7 +57,9 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         switch registration.status {
         // SMAppService may report notFound for a daemon that was never registered; if the
         // plist really is missing, install() reports the error.
-        case .notRegistered, .notFound: return .notInstalled
+        case .notRegistered, .notFound:
+            // Unregistered by a re-registration that is still to be completed: say why.
+            return lock.withLock { reregistrationPending ? infoError : nil }.map { .error($0) } ?? .notInstalled
         case .requiresApproval: return .needsApproval
         case .enabled: return lock.withLock { infoError }.map { .error($0) } ?? .installed
         }
@@ -57,14 +67,27 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
 
     public func refreshInfo() {
         let startedIn = lock.withLock { registrationGeneration }
-        guard let client, registration.status == .enabled else { return }
-        let problem = check(client).flatMap { reregister(client, because: $0) }
+        guard let client else { return }
+        let problem: String?
+        if lock.withLock({ reregistrationPending }) {
+            // Unregistered (or never confirmed) by a re-registration that did not finish.
+            problem = reregister(client, because: lock.withLock { reregistrationReason })
+        } else if registration.status == .enabled {
+            problem = check(client).flatMap { reregister(client, because: $0) }
+        } else {
+            return
+        }
         lock.withLock {
             // The user installed or removed the helper meanwhile: this is about the old one.
             guard registrationGeneration == startedIn else { return }
             if let problem { log.error("helper: \(problem, privacy: .public)") }
             infoError = problem
         }
+    }
+
+    /// Call under `lock`.
+    private var reregistrationPending: Bool {
+        reregistration == .unregisterPending || reregistration == .registerPending
     }
 
     /// What is wrong with the enabled daemon, or nil when it answers with this app's version.
@@ -84,28 +107,47 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     /// An enabled daemon that fails a check: one left over from another app version (an
     /// in-place update), one that drops the connection unanswered, or a job launchd removed
     /// after it kept failing while SMAppService still reports it enabled (info() only times
-    /// out). Re-register once per launch so launchd starts the bundled one, then check the
-    /// replacement. Unregistering sends the old daemon SIGTERM, which interrupts the client's
-    /// connection; the client drops it and the next call opens a new one, so no explicit
-    /// reconnect is needed. Returns the problem left, if any.
+    /// out). Re-register so launchd starts the bundled one, then check the replacement:
+    /// unregister, wait for launchd to confirm the old daemon is gone, register. A step that
+    /// fails is retried from there by the next call (`refreshInfo()`); once the whole
+    /// sequence has gone through, it is not repeated in this launch. Unregistering sends the
+    /// old daemon SIGTERM, which interrupts the client's connection; the client drops it and
+    /// the next call opens a new one, so no explicit reconnect is needed. Returns the problem
+    /// left, if any.
     private func reregister(_ client: HelperClient, because failure: String) -> String? {
         // nil: re-registered; otherwise why not.
         let refused: String? = mutationLock.withLock {
             let allowed = lock.withLock { () -> Bool in
-                guard !userRemoved, !reregistered else { return false }
-                reregistered = true
+                guard !userRemoved else { return false }
+                switch reregistration {
+                case .none:
+                    // The user's uninstall may have run between info() and here.
+                    guard registration.status == .enabled else { return false }
+                    reregistration = .unregisterPending
+                    reregistrationReason = failure
+                case .unregisterPending, .registerPending: break
+                case .done: return false
+                }
                 return true
             }
-            // The user's uninstall may have run between info() and here.
-            guard allowed, registration.status == .enabled else { return failure }
+            guard allowed else { return failure }
             log.notice("\(failure, privacy: .public): re-registering")
+            if lock.withLock({ reregistration }) == .unregisterPending {
+                do {
+                    try registration.unregisterAndWait(timeout: unregisterWait)
+                } catch {
+                    // Not confirmed: register() must not run; the next refresh waits again.
+                    return "\(failure); unregistering failed: \(HelperError.message(for: error))"
+                }
+                lock.withLock { reregistration = .registerPending }
+            }
             do {
-                try registration.unregister()
                 try registerAfterUnregister()
-                return nil
             } catch {
                 return "\(failure); re-registering failed: \(error.localizedDescription)"
             }
+            lock.withLock { reregistration = .done }
+            return nil
         }
         if let refused { return refused }
         var problem = failure
@@ -135,6 +177,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         lock.withLock {
             infoError = nil
             userRemoved = false
+            if reregistrationPending { reregistration = .none }
             registrationGeneration += 1
         }
         do {
@@ -155,6 +198,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         lock.withLock {
             infoError = nil
             userRemoved = true
+            if reregistrationPending { reregistration = .none }
             registrationGeneration += 1
         }
         guard registration.status != .notRegistered else { return }
