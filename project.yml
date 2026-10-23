@@ -3,6 +3,12 @@ options:
   bundleIdPrefix: io.github.aesarva
   deploymentTarget:
     macOS: "14.0"
+# One version for the app and the daemon: a mismatch makes the app re-register the daemon on
+# every launch. Both targets inherit these.
+settings:
+  base:
+    MARKETING_VERSION: "0.3.0"
+    CURRENT_PROJECT_VERSION: "1"
 packages:
   LidlessCore:
     path: Packages/LidlessCore
@@ -34,8 +40,6 @@ targets:
         LOCALIZATION_PREFERS_STRING_CATALOGS: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_HARDENED_RUNTIME: YES
-        CURRENT_PROJECT_VERSION: "1"
-        MARKETING_VERSION: "0.3.0"
   LidlessHelper:
     type: tool
     platform: macOS
@@ -56,5 +60,3 @@ targets:
         SKIP_INSTALL: YES
         SWIFT_VERSION: "6.0"
         CODE_SIGN_IDENTITY: "-"
-        CURRENT_PROJECT_VERSION: "1"
-        MARKETING_VERSION: "0.3.0"

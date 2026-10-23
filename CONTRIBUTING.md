@@ -30,7 +30,7 @@ git switch main && git merge --no-ff develop
 git tag v0.3.0
 ```
 
-Update `CHANGELOG.md`, the version in `project.yml` (`MARKETING_VERSION`) and the `VERSION` default in the `Makefile` on `develop` before the merge.
+Update `CHANGELOG.md`, the version in `project.yml` (`MARKETING_VERSION`, set once at the top for both the app and the helper) and the `VERSION` default in the `Makefile` on `develop` before the merge.
 
 ## Before merging
 
