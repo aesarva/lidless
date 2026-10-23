@@ -309,7 +309,14 @@ private func makeBackend(
         let (backend, registration, client) = mismatched()
         registration.unregisterHangs = true
         backend.refreshInfo()
-        registration.completeUnregister(error: RegisterError())
+        // The unregister fails while launchd still has the job: this refresh consumes the
+        // failed operation, reports it, and registers nothing.
+        registration.completeUnregister(error: RegisterError(), statusFollows: false)
+        backend.refreshInfo()
+        #expect(registration.calls == ["startUnregister"])
+        if case .error = backend.status() {} else { Issue.record("failed unregister is not .error") }
+
+        // Nothing outstanding now; the job is gone: register() without another unregister.
         registration.stubStatus = .notRegistered
         client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
         backend.refreshInfo()
