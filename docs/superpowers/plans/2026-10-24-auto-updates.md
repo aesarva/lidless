@@ -175,6 +175,7 @@ Spec §8.2, §8.3, §8.5. Самая рискованная задача: точ
       /// Повторить недостигнутое желание (вызывается по опросу показаний).
       func retry()
       /// Свежий `info` на очереди после всех отправленных команд: true — демон ответил и не владеет.
+      /// Ответ, пришедший после нового `setWanted`, отбрасывается (номер желания сверяется в сервисе).
       func confirmReleased(_ done: @escaping @MainActor (Bool) -> Void)
       func connectionLost(generation: UInt64)
   }
@@ -183,15 +184,18 @@ Spec §8.2, §8.3, §8.5. Самая рискованная задача: точ
 - `LidSleepService.init(backend: PrivilegedBackend, first: (@Sendable () -> Void)? = nil)`:
   - одна последовательная `DispatchQueue`; `first` — первая работа на ней (сброс 0.2.0, §8.2);
   - `setWanted` запоминает желание и ставит на очередь шаг «привести»: шаг читает текущее желание (под замком), и если подтверждённое `held` не равно ему — `backend.setSleepDisabled(wanted)`; результат (поколение соединения или ошибка) возвращается на главный актор, `hold` обновляется, и если желание за это время изменилось — ставится ещё шаг;
-  - при желании «нет» команда отправляется, даже если локально `held == false` (демон мог держать от прошлого запроса); при статусе не `.installed`/`.error` шаг не зовёт демона: «нет» считается достигнутым, «да» — `failure = "helper not ready"`, `pending = false`;
+  - при желании «нет» команда отправляется, даже если локально `held == false` (демон мог держать от прошлого запроса); успешный ответ на `setSleepDisabled(false)` — подтверждение снятия нашего удержания (свежий `info` нужен только для восстановления после ошибки и для Remove — иначе вторая копия Lidless, держащая режим, вечно держала бы предупреждение);
+  - включение (`true`) отправляется только при статусе `.installed` (проверенный демон, Task 3); выключение — при `.installed`, `.error` и `.checking`; при `.notInstalled`/`.needsApproval`/`.unsigned` «нет» достигнуто без вызова (зарегистрированного демона нет), «да» — `failure = "helper not ready"`, `pending = false`;
+  - `setWanted` сразу публикует `pending = (wanted != held)` через `onChange`, до ответа демона;
   - `connectionLost(generation:)`: поколения ≥ поколения удержания и ещё не записанные (ответ включения не дошёл) запоминаются в `lostGenerations`; удержание с таким поколением считается `held = false`; если желание «да» — ставится шаг «привести».
 - `Session.lidModePending: Bool` — для строки «Turning on…» / «Включается…».
 - `SessionController`:
-  - `private func syncLidWanted()` — единственное место, где задаётся желание: `wanted = session != nil && settings.lidModeEnabled && session.lidModeSuspendedReason == nil(или .helperUnavailable при готовом помощнике) && safetyBlock(session) == nil`; вызывается после каждой смены сессии, настройки, паузы и показаний.
+  - `private func syncLidWanted()` — единственное место, где задаётся желание: `wanted = !helperRemovalInProgress && session != nil && settings.lidModeEnabled && session.lidModeSuspendedReason ∈ {nil, .helperUnavailable}`; вызывается после каждой смены сессии, настройки, паузы и показаний.
+  - Правила защиты действуют и на желаемое, ещё не подтверждённое включение: в `update(readings:)` при `settings.lidModeEnabled`, без паузы по правилу и `safetyBlock(session) != nil` — `suspendLidMode(reason)` (пауза фиксируется, `attention` и одно уведомление, как при паузе активного режима), затем `syncLidWanted()`. Остывание после этого режим сам не включает — снять паузу может только пользователь, как сейчас.
   - `lid.onChange` → `applyLidHold(_:)`: `lidModeActive = hold.held && wanted`, `lidModePending = hold.pending && wanted`; ошибка при желании «да» → пауза `.helperUnavailable` и `raiseHelperUnavailable()` (как сейчас при неудачном включении); ошибка при желании «нет» → «сброс ожидается» (`recoveryPending = true`, `raiseHelperUnavailable()`); переход `held` в `true` при закрытой крышке (`readings?.lidClosed`) без внешнего дисплея → `display.sleepDisplayNow()` и `displayHeldForLid` как в `handleLidTransition`.
   - `update(readings:)` в обеих ветках: `lid.retry()`; если `recoveryPending` и желание «нет» — `lid.confirmReleased { ok in if ok { recoveryPending = false; снять attention .helperUnavailable } }` (ответ применяется, только если желание всё ещё «нет»).
   - `enableLidMode` при `.unsigned` и `.checking` — как `.notInstalled` (тихо).
-- `FakeLid`: записывает историю `wanted`; `autoConfirm = true` по умолчанию (сразу `onChange(held: wanted)`), при `false` тест вызывает `deliver(held:pending:failure:)`; `confirmResult: Bool`, `confirmCalls`, `holdConfirm` + `deliverConfirm()`.
+- `FakeLid`: записывает историю `wanted`; `setWanted` сразу публикует `pending = (wanted != held)`; `autoConfirm = true` по умолчанию (сразу `onChange(held: wanted, pending: false)`), при `false` тест вызывает `deliver(held:pending:failure:)`; `confirmResult: Bool`, `confirmCalls`, `holdConfirm` + `deliverConfirm()`; подтверждение, отложенное до нового `setWanted`, при `deliverConfirm()` не вызывает `done` (как сервис).
 
 - [ ] **Step 1: Failing tests:**
   - `LidSleepServiceTests` (с `FakeBackend`, у которого вызовы `setSleepDisabled` блокируются семафором):
@@ -203,15 +207,18 @@ Spec §8.2, §8.3, §8.5. Самая рискованная задача: точ
   - `SessionLidHoldTests` (с `FakeLid`, `autoConfirm = false`):
     - `stopDuringPendingEnableReleases`: `setLidMode(true)` → `stop(.user)` → история желаний `[true, false]`.
     - `timerAndSafetyStopDuringPendingEnableRelease`: то же для `tick()` по истечении и `stop(.safety)`.
-    - `safetyBlockDuringPendingEnable`: желание `true`, затем показания с серьёзным нагревом → желание `false`, после `deliver(held: true)` `lidModeActive == false`.
+    - `safetyBlockDuringPendingEnable`: желание `true`, затем показания с серьёзным нагревом → пауза по нагреву записана, одно уведомление, желание `false`; после `deliver(held: true)` `lidModeActive == false`.
+    - `coolingAfterBlockedPendingStaysPaused`: продолжение — нормальные показания → желание остаётся `false`, пауза та же. То же для лимита времени на батарее.
     - `heldAppliedOnlyWhileWanted`: `setLidMode(true)`, `setLidMode(false)`, `deliver(held: true)` → `lidModeActive == false`.
     - `rapidOffOnKeepsHold`: `true`, `false`, `true`, `deliver(held: true)` → `lidModeActive == true`.
     - `pendingShownUntilConfirmed`: `lidModePending` до `deliver`, потом `lidModeActive`.
     - `closedLidAtConfirmationSleepsDisplay`: крышка закрыта до `deliver(held: true)` → `FakeDisplay.sleepCalls == 1`; с внешним дисплеем → 0.
     - `failedReleaseKeepsRecoveryUntilFreshConfirm`: `deliver(held: true, failure: "x")` при желании `false` → `attention == .helperUnavailable`, одно уведомление; `update(readings:)` при идущей сессии → `confirmCalls == 1`; `confirmResult = false` → остаётся; `true` → снято.
     - `staleConfirmIgnoredAfterReenable`: `holdConfirm`; запрос подтверждения; `setLidMode(true)`; `deliverConfirm()` с `false` → новое желание не изменилось на `false`.
+    - `staleTrueConfirmDoesNotClearNewRecovery`: неудачное выключение → запрос подтверждения (задержан) → `setLidMode(true)` → `setLidMode(false)` снова с ошибкой → `deliverConfirm()` с `true` → `attention == .helperUnavailable` остаётся.
+  - `LidSleepServiceTests` дополнительно: `enableRefusedUnlessVerified` — статус `.error` или `.checking`, `setWanted(true)` → `setSleepDisabled(true)` не вызван, `failure` задан; `releaseAllowedUnderError` — статус `.error`, `setWanted(false)` → `setSleepDisabled(false)` вызван; `lossThenFailedVerificationDoesNotReacquire` — удержание, `connectionLost`, статус `.error` → повторного включения нет.
     - `unsignedWaitsQuietly`, `checkingWaitsQuietly`: статус `.unsigned` / `.checking`, `start` при `lidModeEnabled` → ни уведомления, ни `attention`, пауза `.helperUnavailable`.
-  - Существующие тесты `SessionController` переводятся с `enableCalls`/`disableCalls` на историю желаний `FakeLid`; поведение (пауза, уведомления, `attention`) не меняется.
+  - Существующие тесты `SessionController` переводятся с `enableCalls`/`disableCalls` на историю желаний `FakeLid`; поведение пауз, уведомлений и `attention` не меняется. Исключение — тесты, ожидающие `lidModeActive == true` после неудачного выключения: по новому контракту выключение сразу «выкл», ошибка даёт «сброс ожидается» (`attention == .helperUnavailable`, одно уведомление) — переписать их ожидания под это и назвать в отчёте каждый переписанный тест.
 - [ ] **Step 2:** FAIL.
 - [ ] **Step 3: Implement** по интерфейсам выше. `AppDelegate`: `LidSleepService(backend:first:)` с `LegacySleepReset().resetIfNeeded(…)` вместо отдельного `DispatchQueue.global`; `controller.helperConnectionLost` зовёт `lid.connectionLost`; при выходе `stop(.appQuit)` без ожидания (демон снимает удержание при разрыве), `recoverIfNeeded` убрать. `PreviewLid` — сразу подтверждает желание. Строка режима крышки: «Turning on…» / «Включается…» при `lidModePending`.
 - [ ] **Step 4:** `make test` (все существующие и новые), `make build` → PASS.
@@ -227,16 +234,18 @@ Spec §8.1.
 
 **Interfaces:**
 - Consumes: `LidSleepControlling.setWanted/confirmReleased` (Task 4).
-- Produces: `SessionController.beginHelperRemoval(_ done: @escaping @MainActor (LidModeRestorePoint, Bool) -> Void)` — снимает желание (настройка `lidModeEnabled = false`), затем `confirmReleased`; `Bool` — можно ли удалять. Старый синхронный `beginHelperRemoval() -> LidModeRestorePoint` удаляется. `LidModeRestorePoint` получает `wasPending: Bool`; `restoreAfterFailedRemoval` при `wasActive || wasPending` возвращает настройку и паузу `.helperUnavailable` с прежним `lidModeEnabledAt` — желание восстанавливает `syncLidWanted()`.
+- Produces: `SessionController.beginHelperRemoval(_ done: @escaping @MainActor (LidModeRestorePoint, Bool) -> Void)` — ставит `helperRemovalInProgress = true` (желание «нет» до `endHelperRemoval()`, включение невозможно), снимает настройку `lidModeEnabled = false`, затем `confirmReleased`; повторный вызов, пока удаление идёт, ничего не делает (не вызывает `done`); `SessionController.endHelperRemoval()` снимает флаг (после `uninstall` или `restoreAfterFailedRemoval`); `Bool` — можно ли удалять. Старый синхронный `beginHelperRemoval() -> LidModeRestorePoint` удаляется. `LidModeRestorePoint` получает `wasPending: Bool`; `restoreAfterFailedRemoval` при `wasActive || wasPending` возвращает настройку и паузу `.helperUnavailable` с прежним `lidModeEnabledAt` — желание восстанавливает `syncLidWanted()`.
 
 - [ ] **Step 1: Failing tests:**
   - `removalProceedsAfterConfirmedRelease`: `confirmResult = true` → `done(_, true)`.
   - `removalStopsWhenReleaseFails`: `deliver(held: true, failure:)` при желании `false`, `confirmResult = false` → `done(_, false)`.
   - `removalStopsWhenDaemonStillOwns`: `confirmResult = false` → `done(_, false)`.
   - `removalWithoutLocalHoldStillAsksDaemon`: режим крышки не включён → `confirmReleased` всё равно вызван.
+  - `secondRemovalWhileRunningIgnored`: два `beginHelperRemoval` подряд → `done` вызван один раз.
+  - `noAcquireDuringRemoval`: во время удаления `setLidMode(true)` → желание остаётся `false` до `endHelperRemoval()`.
   - `failedRemovalRestoresPendingEnable`: включение в пути (`autoConfirm = false`) → удаление → `confirmResult = false` → настройка вернулась, желание снова `true`, `lidModeEnabledAt` прежний.
 - [ ] **Step 2:** FAIL.
-- [ ] **Step 3: Implement.** `HelperTab.remove()`: `beginHelperRemoval { point, ok in … }`; при `!ok` — `errorText = String(localized: "Couldn't restore normal sleep — the helper was not removed.")` («Не удалось вернуть обычный сон — помощник не удалён.»), `restoreAfterFailedRemoval(point)`, `uninstall()` не вызывается; при `ok` — как сейчас.
+- [ ] **Step 3: Implement.** `HelperModel.isWorking` ставится до `beginHelperRemoval` и снимается после `uninstall`/восстановления (кнопки заблокированы всё удаление). `HelperTab.remove()`: `beginHelperRemoval { point, ok in … }`, в конце обоих путей `endHelperRemoval()`; при `!ok` — `errorText = String(localized: "Couldn't restore normal sleep — the helper was not removed.")` («Не удалось вернуть обычный сон — помощник не удалён.»), `restoreAfterFailedRemoval(point)`, `uninstall()` не вызывается; при `ok` — как сейчас.
 - [ ] **Step 4:** `make test`, `make build` → PASS.
 - [ ] **Step 5: Commit** `fix(helper): remove the helper only after it confirms normal sleep is back`.
 
