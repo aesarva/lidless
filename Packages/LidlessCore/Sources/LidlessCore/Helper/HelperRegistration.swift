@@ -1,5 +1,4 @@
 import Foundation
-import os
 import ServiceManagement
 
 public enum RegistrationStatus: Equatable, Sendable {
@@ -14,10 +13,37 @@ public protocol HelperRegistration: Sendable {
     var status: RegistrationStatus { get }
     func register() throws
     func unregister() throws
-    /// Returns once launchd confirms the daemon is gone (the completion handler); throws when
-    /// it does not within `timeout`, or reports an error.
-    func unregisterAndWait(timeout: TimeInterval) throws
+    /// Starts `unregister(completionHandler:)`; the returned operation is what launchd's
+    /// completion later resolves, however long that takes.
+    func startUnregister() -> PendingUnregister
     func openSystemSettings()
+}
+
+/// An `unregister` that launchd has not confirmed yet. Kept across waits: a timeout only
+/// stops waiting, the completion can still arrive later and is then not lost.
+public final class PendingUnregister: @unchecked Sendable {
+    private let lock = NSLock()
+    private let arrived = DispatchSemaphore(value: 0)
+    private var result: Result<Void, Error>?
+
+    public init() {}
+
+    /// The completion handler's call; only the first one counts.
+    public func complete(_ error: Error?) {
+        let first = lock.withLock { () -> Bool in
+            guard result == nil else { return false }
+            result = error.map { .failure($0) } ?? .success(())
+            return true
+        }
+        if first { arrived.signal() }
+    }
+
+    /// The outcome once launchd reported it, nil while it is still outstanding after `timeout`.
+    public func wait(timeout: TimeInterval) -> Result<Void, Error>? {
+        if let done = lock.withLock({ result }) { return done }
+        _ = arrived.wait(timeout: .now() + timeout)
+        return lock.withLock { result }
+    }
 }
 
 /// `SMAppService.daemon(plistName:)`; the plist lives in `Contents/Library/LaunchDaemons`.
@@ -49,17 +75,10 @@ public struct SMAppServiceRegistration: HelperRegistration {
         try service.unregister()
     }
 
-    public func unregisterAndWait(timeout: TimeInterval) throws {
-        let done = DispatchSemaphore(value: 0)
-        let result = OSAllocatedUnfairLock<Error?>(initialState: nil)
-        service.unregister { error in
-            result.withLock { $0 = error }
-            done.signal()
-        }
-        guard done.wait(timeout: .now() + timeout) == .success else {
-            throw HelperError.installFailed("unregister timed out")
-        }
-        if let error = result.withLock({ $0 }) { throw error }
+    public func startUnregister() -> PendingUnregister {
+        let pending = PendingUnregister()
+        service.unregister { pending.complete($0) }
+        return pending
     }
 
     public func openSystemSettings() {

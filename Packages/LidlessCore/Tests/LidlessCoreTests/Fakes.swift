@@ -124,6 +124,7 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
     private var _registerError: Error?
     private var _statusAfterRegister: RegistrationStatus?
     private var _onRegister: (@Sendable () -> Void)?
+    private var _outstanding: PendingUnregister?
     private var _calls: [String] = []
     private var _unregisterHangs = false
 
@@ -181,13 +182,30 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
         }
     }
 
-    func unregisterAndWait(timeout: TimeInterval) throws {
-        try lock.withLock {
-            _calls.append("unregisterAndWait")
-            if _unregisterHangs { throw HelperError.installFailed("unregister timed out") }
+    func startUnregister() -> PendingUnregister {
+        let pending = PendingUnregister()
+        let hangs = lock.withLock { () -> Bool in
+            _calls.append("startUnregister")
             _unregisterCalls += 1
-            _status = .notRegistered
+            if _unregisterHangs { _outstanding = pending }
+            return _unregisterHangs
         }
+        if !hangs { finish(pending) }
+        return pending
+    }
+
+    /// Launchd's late completion of the hung `startUnregister`: the job is gone from now on.
+    func completeUnregister(error: Error? = nil) {
+        guard let pending = lock.withLock({ () -> PendingUnregister? in
+            defer { _outstanding = nil }
+            return _outstanding
+        }) else { return }
+        finish(pending, error: error)
+    }
+
+    private func finish(_ pending: PendingUnregister, error: Error? = nil) {
+        if error == nil { lock.withLock { _status = .notRegistered } }
+        pending.complete(error)
     }
 
     func openSystemSettings() { lock.withLock { _openSettingsCalls += 1 } }

@@ -26,6 +26,10 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     private var reregistration = Reregistration.none
     /// Why the pending re-registration began (the failed check).
     private var reregistrationReason = ""
+    /// The `unregister` of the pending re-registration that launchd has not confirmed (a wait
+    /// timed out): the next attempt waits for this one instead of issuing another. Dropped
+    /// by uninstall().
+    private var outstandingUnregister: PendingUnregister?
     /// The user removed the helper: no automatic re-registration until the next `install()`.
     private var userRemoved = false
     /// Bumped by install() and uninstall(): a refresh that began before one does not report.
@@ -71,7 +75,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         let problem: String?
         if lock.withLock({ reregistrationPending }) {
             // Unregistered (or never confirmed) by a re-registration that did not finish.
-            problem = reregister(client, because: lock.withLock { reregistrationReason })
+            problem = reregister(client, because: lock.withLock { reregistrationReason }, retry: true)
         } else if registration.status == .enabled {
             problem = check(client).flatMap { reregister(client, because: $0) }
         } else {
@@ -104,59 +108,90 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         }
     }
 
+    private enum Outcome { case reregistered, refused, alreadyDone }
+
     /// An enabled daemon that fails a check: one left over from another app version (an
     /// in-place update), one that drops the connection unanswered, or a job launchd removed
     /// after it kept failing while SMAppService still reports it enabled (info() only times
     /// out). Re-register so launchd starts the bundled one, then check the replacement:
     /// unregister, wait for launchd to confirm the old daemon is gone, register. A step that
-    /// fails is retried from there by the next call (`refreshInfo()`); once the whole
-    /// sequence has gone through, it is not repeated in this launch. Unregistering sends the
-    /// old daemon SIGTERM, which interrupts the client's connection; the client drops it and
-    /// the next call opens a new one, so no explicit reconnect is needed. Returns the problem
-    /// left, if any.
-    private func reregister(_ client: HelperClient, because failure: String) -> String? {
-        // nil: re-registered; otherwise why not.
-        let refused: String? = mutationLock.withLock {
-            let allowed = lock.withLock { () -> Bool in
-                guard !userRemoved else { return false }
+    /// fails is retried from there by the next call (`refreshInfo()`, `install()`); once the
+    /// whole sequence has gone through, it is not repeated in this launch. Unregistering
+    /// sends the old daemon SIGTERM, which interrupts the client's connection; the client
+    /// drops it and the next call opens a new one, so no explicit reconnect is needed.
+    /// Returns the problem left, if any.
+    private func reregister(_ client: HelperClient, because failure: String, retry: Bool = false) -> String? {
+        var problem = failure
+        let outcome: Outcome = mutationLock.withLock {
+            // The user's uninstall may have run between info() and here.
+            let enabled = registration.status == .enabled
+            let allowed = lock.withLock { () -> Outcome? in
+                guard !userRemoved else { return .refused }
                 switch reregistration {
                 case .none:
-                    // The user's uninstall may have run between info() and here.
-                    guard registration.status == .enabled else { return false }
+                    guard enabled else { return .refused }
                     reregistration = .unregisterPending
                     reregistrationReason = failure
                 case .unregisterPending, .registerPending: break
-                case .done: return false
+                case .done: return .alreadyDone
                 }
-                return true
+                return nil
             }
-            guard allowed else { return failure }
+            if let allowed { return allowed }
             log.notice("\(failure, privacy: .public): re-registering")
-            if lock.withLock({ reregistration }) == .unregisterPending {
-                do {
-                    try registration.unregisterAndWait(timeout: unregisterWait)
-                } catch {
-                    // Not confirmed: register() must not run; the next refresh waits again.
-                    return "\(failure); unregistering failed: \(HelperError.message(for: error))"
-                }
-                lock.withLock { reregistration = .registerPending }
-            }
             do {
-                try registerAfterUnregister()
+                try finishReregistration()
             } catch {
-                return "\(failure); re-registering failed: \(error.localizedDescription)"
+                problem = "\(failure); re-registering failed: \(Self.describe(error))"
+                return .refused
             }
-            lock.withLock { reregistration = .done }
-            return nil
+            return .reregistered
         }
-        if let refused { return refused }
-        var problem = failure
+        switch outcome {
+        case .refused: return problem
+        // Another refresh finished it meanwhile; `failure` may be a stale reason.
+        case .alreadyDone: return retry ? check(client) : failure
+        case .reregistered: break
+        }
         for _ in 0..<Self.verifyAttempts {
             if verifyDelay > 0 { Thread.sleep(forTimeInterval: verifyDelay) }
             guard let message = check(client) else { return nil }
             problem = "after re-registering: \(message)"
         }
         return problem
+    }
+
+    private static func describe(_ error: Error) -> String {
+        (error as? HelperError)?.message ?? error.localizedDescription
+    }
+
+    /// The pending steps of a re-registration, from where the last attempt stopped; on
+    /// failure the state stays, so the next attempt resumes. Call under `mutationLock`.
+    private func finishReregistration() throws {
+        if lock.withLock({ reregistration }) == .unregisterPending {
+            try awaitUnregister()
+            lock.withLock { reregistration = .registerPending }
+        }
+        try registerAfterUnregister()
+        lock.withLock { reregistration = .done }
+    }
+
+    /// Returns once launchd no longer has the old daemon. Waits for an `unregister` that is
+    /// still outstanding rather than submitting a second one, which would fail on a job that
+    /// is already gone. Call under `mutationLock`.
+    private func awaitUnregister() throws {
+        let gone = { (status: RegistrationStatus) in status == .notRegistered || status == .notFound }
+        if gone(registration.status) {
+            lock.withLock { outstandingUnregister = nil }
+            return
+        }
+        let pending = lock.withLock { outstandingUnregister } ?? registration.startUnregister()
+        lock.withLock { outstandingUnregister = pending }
+        guard let result = pending.wait(timeout: unregisterWait) else {
+            throw HelperError.installFailed("unregister timed out")
+        }
+        lock.withLock { outstandingUnregister = nil }
+        if case .failure(let error) = result, !gone(registration.status) { throw error }
     }
 
     /// register() right after unregister() fails with EPERM while launchd is still removing
@@ -174,18 +209,24 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     public func install() throws {
         guard client != nil else { throw HelperError.installFailed(Self.unsignedMessage) }
         mutationLock.lock(); defer { mutationLock.unlock() }
-        lock.withLock {
-            infoError = nil
+        // An unfinished re-registration is resumed, not bypassed: its unregister may still
+        // be outstanding, and a failure here must leave it pending.
+        let pending = lock.withLock { () -> Bool in
             userRemoved = false
-            if reregistrationPending { reregistration = .none }
             registrationGeneration += 1
+            if !reregistrationPending { infoError = nil }
+            return reregistrationPending
         }
         do {
-            try registration.register()
+            if pending { try finishReregistration() } else { try registration.register() }
+            lock.withLock {
+                infoError = nil
+                if pending { reregistration = .none }
+            }
         } catch {
             // register() throws while the user has not allowed the daemon yet: show them where.
             guard registration.status == .requiresApproval else {
-                throw HelperError.installFailed(error.localizedDescription)
+                throw HelperError.installFailed(Self.describe(error))
             }
         }
         if registration.status == .requiresApproval { registration.openSystemSettings() }
@@ -198,7 +239,8 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         lock.withLock {
             infoError = nil
             userRemoved = true
-            if reregistrationPending { reregistration = .none }
+            reregistration = .none
+            outstandingUnregister = nil
             registrationGeneration += 1
         }
         guard registration.status != .notRegistered else { return }

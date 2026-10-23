@@ -200,7 +200,7 @@ private func makeBackend(
         client.infoScript = [.success(HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false))]
         let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
         backend.refreshInfo()
-        #expect(registration.calls == ["unregisterAndWait", "register"])
+        #expect(registration.calls == ["startUnregister", "register"])
         #expect(backend.status() == .installed)
     }
 
@@ -222,7 +222,7 @@ private func makeBackend(
         registration.registerError = nil
         client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
         backend.refreshInfo()
-        #expect(registration.calls == ["unregisterAndWait", "register", "register", "register", "register"])
+        #expect(registration.calls == ["startUnregister", "register", "register", "register", "register"])
         #expect(backend.status() == .installed)
 
         // Done: a later mismatch is not re-registered again in this launch.
@@ -231,26 +231,112 @@ private func makeBackend(
         #expect(registration.registerCalls == 4)
     }
 
-    /// An unconfirmed unregister never leads to register(); the next refresh waits again.
-    @Test func unregisterTimeoutNeverRegisters() {
+    private func mismatched() -> (DaemonBackend, FakeRegistration, FakeHelperClient) {
         let client = FakeHelperClient()
         client.stubInfo = HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)
         let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        return (backend, registration, client)
+    }
+
+    /// register() is not called while launchd has not confirmed the unregister, however
+    /// often the status is refreshed; the same outstanding unregister is waited for.
+    @Test func registrationBlockedUntilCompletion() {
+        let (backend, registration, client) = mismatched()
         registration.unregisterHangs = true
         backend.refreshInfo()
         backend.refreshInfo()
-        #expect(registration.calls == ["unregisterAndWait", "unregisterAndWait"])
+        #expect(registration.calls == ["startUnregister"])
         if case .error(let message) = backend.status() {
             #expect(message.contains("unregister timed out"))
         } else {
             Issue.record("unconfirmed unregister is not .error")
         }
-
-        registration.unregisterHangs = false
+        registration.completeUnregister()
         client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
         backend.refreshInfo()
-        #expect(registration.calls == ["unregisterAndWait", "unregisterAndWait", "unregisterAndWait", "register"])
+        #expect(registration.calls == ["startUnregister", "register"])
         #expect(backend.status() == .installed)
+    }
+
+    /// The completion that arrives after the wait gave up registers without a second unregister
+    /// (which would fail on a job that is already gone).
+    @Test func timeoutThenLateSuccessRegistersWithoutSecondUnregister() {
+        let (backend, registration, client) = mismatched()
+        registration.unregisterHangs = true
+        backend.refreshInfo()
+        registration.unregisterHangs = false
+        registration.completeUnregister()
+        client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
+        backend.refreshInfo()
+        #expect(registration.calls.filter { $0 == "startUnregister" }.count == 1)
+        #expect(registration.calls.last == "register")
+        #expect(backend.status() == .installed)
+    }
+
+    /// Nothing reported, but launchd no longer has the job: the unregister counts as done.
+    @Test func timeoutThenStatusNotRegisteredCountsAsConfirmed() {
+        let (backend, registration, client) = mismatched()
+        registration.unregisterHangs = true
+        backend.refreshInfo()
+        registration.stubStatus = .notRegistered
+        client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
+        backend.refreshInfo()
+        #expect(registration.calls == ["startUnregister", "register"])
+        #expect(backend.status() == .installed)
+    }
+
+    /// A failed unregister with the daemon still registered is submitted again.
+    @Test func failedUnregisterWithDaemonStillRegisteredStartsANewOne() {
+        let (backend, registration, _) = mismatched()
+        registration.unregisterHangs = true
+        backend.refreshInfo()
+        registration.completeUnregister(error: RegisterError())
+        registration.unregisterHangs = false
+        backend.refreshInfo()
+        // The failure is reported; the following refresh submits a new one.
+        #expect(registration.calls == ["startUnregister"])
+        backend.refreshInfo()
+        #expect(registration.calls == ["startUnregister", "startUnregister", "register"])
+    }
+
+    /// install() resumes the pending re-registration: it waits for the outstanding unregister.
+    @Test func installWaitsForOutstandingUnregister() throws {
+        let (backend, registration, _) = mismatched()
+        registration.unregisterHangs = true
+        backend.refreshInfo()
+        #expect(throws: HelperError.self) { try backend.install() }
+        #expect(registration.calls == ["startUnregister"])
+        registration.completeUnregister()
+        try backend.install()
+        #expect(registration.calls == ["startUnregister", "register"])
+        #expect(backend.status() == .installed)
+    }
+
+    /// An explicit register that fails leaves the automatic retry in place.
+    @Test func failedInstallKeepsRetry() throws {
+        let (backend, registration, client) = mismatched()
+        registration.registerError = RegisterError()
+        backend.refreshInfo()
+        #expect(registration.registerCalls == 3)
+        #expect(throws: HelperError.self) { try backend.install() }
+        if case .error = backend.status() {} else { Issue.record("failed install lost the error") }
+        registration.registerError = nil
+        client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
+        backend.refreshInfo()
+        #expect(backend.status() == .installed)
+        #expect(registration.calls.filter { $0 == "startUnregister" }.count == 1)
+    }
+
+    /// uninstall() forgets even a finished re-registration: after a new install it may run again.
+    @Test func uninstallAllowsReregistrationAgain() throws {
+        let (backend, registration, client) = mismatched()
+        backend.refreshInfo()
+        #expect(registration.unregisterCalls == 1)
+        try backend.uninstall()
+        try backend.install()
+        client.stubInfo = HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)
+        backend.refreshInfo()
+        #expect(registration.unregisterCalls == 3)
     }
 
     /// The user's uninstall cancels a pending re-registration.
