@@ -181,6 +181,20 @@ import Testing
         #expect(setting.writes == [true])
     }
 
+    /// The SIGTERM handler retries a failed shutdown: the guard is already closed, but the
+    /// retry still writes the 0.
+    @Test func shutdownRetriedAfterAFailureResets() throws {
+        let (guardian, setting, store) = make(initial: false)
+        try guardian.acquire(a)
+        setting.failWriteZeroTimes = 1
+        #expect(throws: FakeSleepSettingError.self) { try guardian.shutdown() }
+        try guardian.shutdown()
+        #expect(setting.writes == [true, false])
+        #expect(setting.value == false)
+        #expect(!store.exists())
+        #expect(guardian.isIdle)
+    }
+
     @Test func shutdownIfIdleClosesOnlyWhenIdle() throws {
         let (guardian, setting, _) = make(initial: false)
         try guardian.acquire(a)
