@@ -27,8 +27,8 @@
 
 ## Review Focus
 
-1. **Быстрые выкл→вкл режима крышки при медленном демоне** — итог «включён», удержание не снято старым выключением. → `rapidOffOnKeepsNewHold` (Task 4).
-2. **Стоп и сразу старт сессии, пока выключение в пути** — новая сессия с режимом крышки держит его. → `stopThenStartWithDelayedDisableHolds` (Task 4).
+1. **Остановка сессии, пока включение режима крышки в пути** — после ответа демона удержание снято, `disablesleep` не остаётся 1. → `stopDuringPendingEnableReleases` (Task 4).
+2. **Нагрев или лимит на батарее, пока включение в пути** — режим крышки не становится активным. → `safetyBlockDuringPendingEnable` (Task 4).
 3. **Обновление при паузе по нагреву** — после перезапуска режим крышки не включается сам. → `resumeKeepsSafetySuspension` (Task 9).
 4. **Крышку закрыли во время скачивания** — установка ждёт открытия. → `installWaitsForOpenLid` (Task 6).
 5. **Демон отвечает ошибкой `pmset -g`, но жив** — нет перерегистрации, статус «ошибка». → `errorReplyDoesNotReregister` (Task 3).
@@ -79,7 +79,7 @@ Spec §8.4, §8.8 (часть демона).
   - `HelperProtocol.info(reply: @escaping @Sendable (String, String, Bool, Bool, String?) -> Void)` — версия, сборка, `disablesleep`, владеет ли демон, ошибка.
   - `HelperInfo(version: String, build: String, sleepDisabled: Bool, owned: Bool)`.
   - `SleepGuard.ownsSetting: Bool` — маркер `.owned`.
-  - `HelperConnection.init(holder:guard:cleaner:version:build:onGuardChange:)`; `Daemon.init(guard:cleaner:version:build:lifecycle:)`; `main.swift` берёт `CFBundleVersion` демона (`"unknown"`, если нет).
+  - `HelperConnection.init(holder:guard:cleaner:version:build:setting: SleepSetting = PmsetSleepSetting(), onGuardChange:)` (существующий параметр `setting` сохраняется — на нём держится `infoReadErrorIsReported`); `Daemon.init(guard:cleaner:version:build:lifecycle:)`; `main.swift` берёт `CFBundleVersion` демона (`"unknown"`, если нет).
 
 - [ ] **Step 1: Failing tests** — в `SleepGuardTests`:
   - `confirmedResetThenMarkerRemoveFailureDoesNotWriteAgain`: держатель, `release` при `store.remove` падающем один раз → `setting` записал `false` один раз; затем `retryPendingReset()` → `setting` новых записей нет, файл удалён.
@@ -110,7 +110,8 @@ Spec §8.9.
   - `failedReregistrationIsRetriedOnNextRefresh`: все 3 `register` падают → статус `.error`; затем `register` проходит → следующий `refreshInfo()` регистрирует снова и при ответе `info` с совпадающими версией и сборкой статус `.installed`.
   - Существующий `reregistrationGivesUpAfterThreeRegisterFailures` переписать под новое поведение (ожидание — `.error` с текстом причины и повтор на следующем `refreshInfo`, а не `.notInstalled` навсегда).
 - [ ] **Step 2:** FAIL.
-- [ ] **Step 3: Implement.** В `reregister`: `unregisterAndWait(timeout: unregisterWait)` вместо `unregister()`. Флаг «раз за запуск» (`reregistered`) ставится только после успешного `register()`; при неудаче — поле `reregisterPending = true`, и `refreshInfo` при `pending` сначала повторяет `registerAfterUnregister()` (под `mutationLock`, с проверкой `userRemoved`), затем проверяет `info`. `uninstall()` сбрасывает `pending`.
+- [ ] **Step 3: Implement.** В `reregister`: `unregisterAndWait(timeout: unregisterWait)` вместо `unregister()`. Состояние повтора — `enum Reregistration { case none, unregisterPending, registerPending, done }`: тайм-аут или ошибка `unregisterAndWait` → `.unregisterPending` (следующий `refreshInfo` начинает снова с `unregisterAndWait`, `register()` не вызывается); `unregister` подтверждён, но `register()` не прошёл → `.registerPending` (следующий `refreshInfo` повторяет только `registerAfterUnregister()`); успех → `.done` (больше не перерегистрирует в этом запуске). Всё под `mutationLock`, с проверкой `userRemoved`; `uninstall()` сбрасывает в `.none`.
+  Дополнительный тест: `unregisterTimeoutNeverRegisters` — `FakeRegistration` не вызывает обработчик `unregister` → `register` не вызван ни в этом, ни в следующем `refreshInfo`, пока обработчик не пришёл.
 - [ ] **Step 4:** `make test` → PASS.
 - [ ] **Step 5: Commit** `fix(helper): re-register after launchd confirms the old daemon is gone, retry a failed one`.
 
@@ -127,7 +128,10 @@ Spec §8.6, §8.7, §8.8 (сторона приложения).
 - Produces:
   - `HelperError.timedOut` — клиент бросает его вместо `.commandFailed("timed out")`; `message` = `"timed out"`.
   - `DaemonBackend.init(registration:client:appVersion:appBuild:…)` — `AppDelegate` передаёт `Bundle.main` `CFBundleVersion`.
-  - `PrivilegedBackend.lastInfo() -> HelperInfo?` — последний успешный ответ демона текущей регистрации (сбрасывается при install/uninstall).
+  - `PrivilegedBackend.lastInfo() -> HelperInfo?` — последний успешный ответ демона текущей регистрации (сбрасывается при install/uninstall); только для показа.
+  - `PrivilegedBackend.freshInfo() throws -> HelperInfo` — синхронный вызов `info` сейчас, без кеша (для `confirmReleased`, Task 4); ошибки — как у `info`.
+  - `HelperStatus.checking` — регистрация `.enabled`, но совпадающий `info` для текущей регистрации ещё не получен (после запуска, `install`, перерегистрации). `status()` даёт `.installed` только после такой проверки. Все `switch` по `HelperStatus` в App и LidlessCore получают ветку: для режима крышки — как `.needsApproval` (ждёт молча), подпись на вкладке и в строке — «Checking…» / «Проверка…».
+  - `HelperCoordinator` вызывает `onChange` после каждого завершённого `refresh` (не только при смене статуса), `HelperModel.sync()` копирует `daemonInfo = backend.lastInfo()`; `onBecameInstalled` — при переходе в `.installed` из любого другого статуса, включая `.checking`.
   - `HelperModel.daemonInfo: HelperInfo?`.
 
 - [ ] **Step 1: Failing tests:**
@@ -137,49 +141,81 @@ Spec §8.6, §8.7, §8.8 (сторона приложения).
   - `buildMismatchReregisters`: версия совпадает, сборка другая → перерегистрация.
   - `rejectedReregisters` (существующий `rejectedInfoReregistersOnce` остаётся зелёным).
   - `lastInfoAfterSuccessfulInfo` / `lastInfoClearedByUninstall`.
+  - `statusIsCheckingUntilMatchingInfo`: регистрация `.enabled`, `info` ещё не спрашивали → `.checking`; после совпадающего `info` → `.installed`; после перерегистрации снова `.checking` до ответа.
+  - В `HelperCoordinatorTests`: `onChangeAfterRefreshWithUnchangedStatus` — `.installed` → успешный `refresh` с тем же статусом → `onChange` вызван.
   - В `XPCHelperClientTests`: `timeoutThrowsTimedOut` (сервис, который не отвечает, клиент с малым тайм-аутом).
 - [ ] **Step 2:** FAIL.
 - [ ] **Step 3: Implement** `check(_:)` возвращает тип причины: `.mismatch` (версия или сборка), `.dropped` (`.rejected`), `.timedOut` (после одной повторной попытки через `retryDelay`, по умолчанию 1 с, тесты — 0), `.failed(String)` (ответ с ошибкой и прочее). Перерегистрация — только для первых трёх. Строка вкладки Helper для `.installed`: `"Running — version \(v) (build \(b))"` / «Работает — версия \(v) (сборка \(b))»; без `daemonInfo` — как сейчас.
 - [ ] **Step 4:** `make test`, `make build` → PASS.
 - [ ] **Step 5: Commit** `fix(helper): re-register only on a lost connection, a timeout twice or another build; show the daemon build`.
 
-### Task 4: асинхронный `LidSleepService` и `SessionController` на завершениях
+### Task 4: `LidSleepService` приводит демона к желаемому состоянию; `SessionController` задаёт желание
 
-Spec §8.2, §8.3, §8.5. Самая рискованная задача: точно сохраняй существующее поведение пауз, уведомлений и `attention`; меняется только момент применения результата.
+Spec §8.2, §8.3, §8.5. Самая рискованная задача: точно сохраняй существующее поведение пауз, уведомлений и `attention`; меняется только то, кто и когда зовёт демона.
 
 **Files:**
 - Modify: `Packages/LidlessCore/Sources/LidlessCore/Helper/LidSleepService.swift`, `Packages/LidlessCore/Sources/LidlessCore/Session/SessionController.swift`, `Packages/LidlessCore/Sources/LidlessCore/Model/Session.swift`, `App/AppDelegate.swift`, `App/Debug/PreviewSupport.swift`, `App/Popover/ControlRows.swift`, `App/Resources/Localizable.xcstrings`
-- Test: `SessionControllerSafetyTests.swift`, `LidSleepServiceTests.swift`, другие тесты `SessionController`, `Fakes.swift` (`FakeLid`)
+- Test: `LidSleepServiceTests.swift`, `SessionControllerSafetyTests.swift`, новый `SessionLidHoldTests.swift`, `Fakes.swift`
 
 **Interfaces:**
-- Produces (`LidSleepControlling`, `@MainActor`):
+- Consumes: `PrivilegedBackend.freshInfo()`, `HelperStatus.checking` (Task 3); `HelperInfo.owned` (Task 1).
+- Produces:
   ```swift
-  func helperStatus() -> HelperStatus
-  func enable(_ done: @escaping @MainActor (Error?) -> Void)
-  func disable(_ done: @escaping @MainActor (Error?) -> Void)
-  /// true — демон ответил и не владеет disablesleep.
-  func confirmReleased(_ done: @escaping @MainActor (Bool) -> Void)
-  func connectionLost(generation: UInt64) -> Bool
+  public struct LidHold: Equatable, Sendable {
+      public var held: Bool          // подтверждено демоном
+      public var pending: Bool       // сервис ещё не привёл демона к желанию
+      public var failure: String?    // последняя ошибка, пока желание не достигнуто
+  }
+  @MainActor public protocol LidSleepControlling: AnyObject {
+      func helperStatus() -> HelperStatus
+      /// Последнее желание побеждает; сервис приводит демона к нему по очереди, повторяет после ошибки при `retry()`.
+      func setWanted(_ wanted: Bool)
+      var onChange: ((LidHold) -> Void)? { get set }
+      var hold: LidHold { get }
+      /// Повторить недостигнутое желание (вызывается по опросу показаний).
+      func retry()
+      /// Свежий `info` на очереди после всех отправленных команд: true — демон ответил и не владеет.
+      func confirmReleased(_ done: @escaping @MainActor (Bool) -> Void)
+      func connectionLost(generation: UInt64)
+  }
   ```
-  `recoverIfNeeded()` удаляется.
-- `LidSleepService.init(backend: PrivilegedBackend, first: (@Sendable () -> Void)? = nil)` — `first` ставится на очередь первым (сброс 0.2.0, §8.2). Одна `DispatchQueue` (serial, `.userInitiated`); каждая операция — вызов `backend` на ней, завершение — `Task { @MainActor in done(…) }`. `disable` обращается к демону всегда, когда статус `.installed` или `.error` (без локального короткого пути); при других статусах завершается успехом сразу.
-- `Session.lidModePending: Bool` — включение отправлено, ответа нет (строка режима крышки показывает «turning on…» / «включается…»).
-- `SessionController`: поле `lidOperation: UInt64`, увеличивается на каждый `enable`/`disable`; завершение применяется, только если его номер равен текущему (кроме ошибки выключения: она всегда ставит «сброс ожидается», если режим крышки сейчас не желаем).
-- `FakeLid`: по умолчанию завершает синхронно (существующие тесты почти не меняются); `holdCompletions = true` копит завершения в массив, `complete(at:error:)` выпускает по одному; поле `confirmResult: Bool`.
+  `enable()`, `disable()`, `recoverIfNeeded()` удаляются.
+- `LidSleepService.init(backend: PrivilegedBackend, first: (@Sendable () -> Void)? = nil)`:
+  - одна последовательная `DispatchQueue`; `first` — первая работа на ней (сброс 0.2.0, §8.2);
+  - `setWanted` запоминает желание и ставит на очередь шаг «привести»: шаг читает текущее желание (под замком), и если подтверждённое `held` не равно ему — `backend.setSleepDisabled(wanted)`; результат (поколение соединения или ошибка) возвращается на главный актор, `hold` обновляется, и если желание за это время изменилось — ставится ещё шаг;
+  - при желании «нет» команда отправляется, даже если локально `held == false` (демон мог держать от прошлого запроса); при статусе не `.installed`/`.error` шаг не зовёт демона: «нет» считается достигнутым, «да» — `failure = "helper not ready"`, `pending = false`;
+  - `connectionLost(generation:)`: поколения ≥ поколения удержания и ещё не записанные (ответ включения не дошёл) запоминаются в `lostGenerations`; удержание с таким поколением считается `held = false`; если желание «да» — ставится шаг «привести».
+- `Session.lidModePending: Bool` — для строки «Turning on…» / «Включается…».
+- `SessionController`:
+  - `private func syncLidWanted()` — единственное место, где задаётся желание: `wanted = session != nil && settings.lidModeEnabled && session.lidModeSuspendedReason == nil(или .helperUnavailable при готовом помощнике) && safetyBlock(session) == nil`; вызывается после каждой смены сессии, настройки, паузы и показаний.
+  - `lid.onChange` → `applyLidHold(_:)`: `lidModeActive = hold.held && wanted`, `lidModePending = hold.pending && wanted`; ошибка при желании «да» → пауза `.helperUnavailable` и `raiseHelperUnavailable()` (как сейчас при неудачном включении); ошибка при желании «нет» → «сброс ожидается» (`recoveryPending = true`, `raiseHelperUnavailable()`); переход `held` в `true` при закрытой крышке (`readings?.lidClosed`) без внешнего дисплея → `display.sleepDisplayNow()` и `displayHeldForLid` как в `handleLidTransition`.
+  - `update(readings:)` в обеих ветках: `lid.retry()`; если `recoveryPending` и желание «нет» — `lid.confirmReleased { ok in if ok { recoveryPending = false; снять attention .helperUnavailable } }` (ответ применяется, только если желание всё ещё «нет»).
+  - `enableLidMode` при `.unsigned` и `.checking` — как `.notInstalled` (тихо).
+- `FakeLid`: записывает историю `wanted`; `autoConfirm = true` по умолчанию (сразу `onChange(held: wanted)`), при `false` тест вызывает `deliver(held:pending:failure:)`; `confirmResult: Bool`, `confirmCalls`, `holdConfirm` + `deliverConfirm()`.
 
-- [ ] **Step 1: Failing tests** (новые, в `SessionControllerSafetyTests` или новом `SessionLidOrderingTests.swift`):
-  - `rapidOffOnKeepsNewHold`: активный режим; `holdCompletions`; `setLidMode(false)`, `setLidMode(true)`; выпустить по порядку → `lidModeActive == true`, вызовы `[disable, enable]`.
-  - `stopThenStartWithDelayedDisableHolds`: `stop(.user)` и `start(.indefinite)` при задержанных завершениях → после выпуска `lidModeActive == true`.
-  - `staleCompletionIgnored`: `enable` (задержан) → `setLidMode(false)` → выпустить `enable` → `lidModeActive == false`.
-  - `switchingOffDoesNotCallHelperSynchronously`: при `holdCompletions` после `setLidMode(false)` состояние сессии уже «выкл», `disableCalls == 1`, завершение не выпущено.
-  - `failedDisableKeepsRecoveryPendingUntilConfirmed`: `disable` с ошибкой → `attention == .helperUnavailable`, одно уведомление; `update(readings:)` (и при идущей сессии) вызывает `confirmReleased`; `confirmResult = false` → остаётся; `true` → `attention` снята.
-  - `enableWaitsBehindLegacyReset`: в `LidSleepServiceTests` с `FakeBackend`, у которого `first` блокирует на семафоре → `setSleepDisabled(true)` не вызван, пока семафор не отпущен.
-  - `unsignedWaitsQuietly`: статус `.unsigned`, `settings.lidModeEnabled`, `start` → ни уведомления, ни `attention`, `lidModeSuspendedReason == .helperUnavailable`.
-  - `pendingShownUntilConfirmed`: `holdCompletions`, `setLidMode(true)` → `lidModePending == true`, `lidModeActive == false`; выпустить → наоборот.
+- [ ] **Step 1: Failing tests:**
+  - `LidSleepServiceTests` (с `FakeBackend`, у которого вызовы `setSleepDisabled` блокируются семафором):
+    - `lastWishWins`: `setWanted(true)`, `setWanted(false)`, `setWanted(true)` пока первая команда висит → после отпускания итог `held == true`, команд не больше трёх, последняя — `true`.
+    - `wantedFalseAlwaysCallsDaemon`: `held == false`, `setWanted(false)` при `.installed` → `setSleepDisabled(false)` вызван.
+    - `lossBeforeEnableReplyMeansNotHeld`: команда включения висит, `connectionLost(generation:)` для её поколения, затем отпустить → `held == false` и новый шаг включения поставлен.
+    - `enableWaitsBehindLegacyReset`: `first` блокирует → `setSleepDisabled(true)` не вызван до отпускания.
+    - `confirmUsesFreshInfoAfterCommands`: `lastInfo` говорит «не владеет», `freshInfo` бросает → `confirmReleased` → `false`.
+  - `SessionLidHoldTests` (с `FakeLid`, `autoConfirm = false`):
+    - `stopDuringPendingEnableReleases`: `setLidMode(true)` → `stop(.user)` → история желаний `[true, false]`.
+    - `timerAndSafetyStopDuringPendingEnableRelease`: то же для `tick()` по истечении и `stop(.safety)`.
+    - `safetyBlockDuringPendingEnable`: желание `true`, затем показания с серьёзным нагревом → желание `false`, после `deliver(held: true)` `lidModeActive == false`.
+    - `heldAppliedOnlyWhileWanted`: `setLidMode(true)`, `setLidMode(false)`, `deliver(held: true)` → `lidModeActive == false`.
+    - `rapidOffOnKeepsHold`: `true`, `false`, `true`, `deliver(held: true)` → `lidModeActive == true`.
+    - `pendingShownUntilConfirmed`: `lidModePending` до `deliver`, потом `lidModeActive`.
+    - `closedLidAtConfirmationSleepsDisplay`: крышка закрыта до `deliver(held: true)` → `FakeDisplay.sleepCalls == 1`; с внешним дисплеем → 0.
+    - `failedReleaseKeepsRecoveryUntilFreshConfirm`: `deliver(held: true, failure: "x")` при желании `false` → `attention == .helperUnavailable`, одно уведомление; `update(readings:)` при идущей сессии → `confirmCalls == 1`; `confirmResult = false` → остаётся; `true` → снято.
+    - `staleConfirmIgnoredAfterReenable`: `holdConfirm`; запрос подтверждения; `setLidMode(true)`; `deliverConfirm()` с `false` → новое желание не изменилось на `false`.
+    - `unsignedWaitsQuietly`, `checkingWaitsQuietly`: статус `.unsigned` / `.checking`, `start` при `lidModeEnabled` → ни уведомления, ни `attention`, пауза `.helperUnavailable`.
+  - Существующие тесты `SessionController` переводятся с `enableCalls`/`disableCalls` на историю желаний `FakeLid`; поведение (пауза, уведомления, `attention`) не меняется.
 - [ ] **Step 2:** FAIL.
-- [ ] **Step 3: Implement.** Все места, где сейчас `try lid.enable()` / `disableLidHandlingFailure()` (`start`, `stop`, `setLidMode`, `update` при паузе по правилу, `helperConnectionLost`, `retryHelperSuspendedLidMode`), переводятся на завершения; состояние «до ответа» — как описано выше. Пауза по правилу защиты (`suspendLidMode`) помечает сессию сразу, выключение — в фоне (как выключение пользователем). `recoveryPending` обслуживается `attemptRecovery()` в обеих ветках `update(readings:)` через `confirmReleased` (при `false` — повтор `disable`, затем снова `confirmReleased` на следующем опросе). `enableLidMode` при `.unsigned` — как `.notInstalled` (тихо). `AppDelegate`: `LidSleepService(backend:first:)` с `LegacySleepReset().resetIfNeeded(…)` вместо отдельного `DispatchQueue.global`; при выходе — `stop(.appQuit)` без ожидания (демон снимает удержание при разрыве), строка `_ = lidControl.recoverIfNeeded()` удаляется. `PreviewLid` — синхронные завершения.
-- [ ] **Step 4:** `make test` (все 254+ существующих и новые), `make build` → PASS.
-- [ ] **Step 5: Commit** `fix(session): helper calls off the main thread, in order, applied by operation number`.
+- [ ] **Step 3: Implement** по интерфейсам выше. `AppDelegate`: `LidSleepService(backend:first:)` с `LegacySleepReset().resetIfNeeded(…)` вместо отдельного `DispatchQueue.global`; `controller.helperConnectionLost` зовёт `lid.connectionLost`; при выходе `stop(.appQuit)` без ожидания (демон снимает удержание при разрыве), `recoverIfNeeded` убрать. `PreviewLid` — сразу подтверждает желание. Строка режима крышки: «Turning on…» / «Включается…» при `lidModePending`.
+- [ ] **Step 4:** `make test` (все существующие и новые), `make build` → PASS.
+- [ ] **Step 5: Commit** `fix(session): lid mode as a wanted state the helper service converges to, off the main thread`.
 
 ### Task 5: Remove только после подтверждённого сброса
 
@@ -190,14 +226,15 @@ Spec §8.1.
 - Test: тесты `SessionController` (удаление помощника), `Fakes.swift`
 
 **Interfaces:**
-- Consumes: `LidSleepControlling.disable/confirmReleased` (Task 4).
-- Produces: `SessionController.beginHelperRemoval(_ done: @escaping @MainActor (LidModeRestorePoint, Bool) -> Void)` — выключает режим крышки, затем `confirmReleased`; `Bool` — можно ли удалять. Старый синхронный `beginHelperRemoval() -> LidModeRestorePoint` удаляется.
+- Consumes: `LidSleepControlling.setWanted/confirmReleased` (Task 4).
+- Produces: `SessionController.beginHelperRemoval(_ done: @escaping @MainActor (LidModeRestorePoint, Bool) -> Void)` — снимает желание (настройка `lidModeEnabled = false`), затем `confirmReleased`; `Bool` — можно ли удалять. Старый синхронный `beginHelperRemoval() -> LidModeRestorePoint` удаляется. `LidModeRestorePoint` получает `wasPending: Bool`; `restoreAfterFailedRemoval` при `wasActive || wasPending` возвращает настройку и паузу `.helperUnavailable` с прежним `lidModeEnabledAt` — желание восстанавливает `syncLidWanted()`.
 
 - [ ] **Step 1: Failing tests:**
   - `removalProceedsAfterConfirmedRelease`: `confirmResult = true` → `done(_, true)`.
-  - `removalStopsWhenDisableFails`: `failDisable` → `done(_, false)`, `confirmReleased` не спрашивался или ответил `false`.
+  - `removalStopsWhenReleaseFails`: `deliver(held: true, failure:)` при желании `false`, `confirmResult = false` → `done(_, false)`.
   - `removalStopsWhenDaemonStillOwns`: `confirmResult = false` → `done(_, false)`.
   - `removalWithoutLocalHoldStillAsksDaemon`: режим крышки не включён → `confirmReleased` всё равно вызван.
+  - `failedRemovalRestoresPendingEnable`: включение в пути (`autoConfirm = false`) → удаление → `confirmResult = false` → настройка вернулась, желание снова `true`, `lidModeEnabledAt` прежний.
 - [ ] **Step 2:** FAIL.
 - [ ] **Step 3: Implement.** `HelperTab.remove()`: `beginHelperRemoval { point, ok in … }`; при `!ok` — `errorText = String(localized: "Couldn't restore normal sleep — the helper was not removed.")` («Не удалось вернуть обычный сон — помощник не удалён.»), `restoreAfterFailedRemoval(point)`, `uninstall()` не вызывается; при `ok` — как сейчас.
 - [ ] **Step 4:** `make test`, `make build` → PASS.
@@ -208,7 +245,7 @@ Spec §8.1.
 Spec §3.1, §4 (чистая часть).
 
 **Files:**
-- Create: `Packages/LidlessCore/Sources/LidlessCore/Updates/UpdateState.swift` (перенос ochre `UpdateState`, `UpdateEvent`, `UpdateModel`, `UpdateLocation`), `Packages/LidlessCore/Sources/LidlessCore/Updates/ResumeSnapshot.swift`, `Packages/LidlessCore/Sources/LidlessCore/Updates/InstallGate.swift`
+- Create: `Packages/LidlessCore/Sources/LidlessCore/Updates/UpdateState.swift` (перенос ochre `UpdateState`, `UpdateEvent`, `UpdateModel`, `UpdateLocation`), `Packages/LidlessCore/Sources/LidlessCore/Updates/UpdateErrors.swift` (перенос ochre `Sources/MetricsCore/Updates/UpdateErrors.swift` с его тестами — его зовёт `UpdateController`), `Packages/LidlessCore/Sources/LidlessCore/Updates/ResumeSnapshot.swift`, `Packages/LidlessCore/Sources/LidlessCore/Updates/InstallGate.swift`
 - Test: `Packages/LidlessCore/Tests/LidlessCoreTests/{UpdateStateTests,ResumeSnapshotTests,InstallGateTests}.swift`
 
 **Interfaces:**
@@ -226,20 +263,20 @@ Spec §3.1, §4 (чистая часть).
   public struct UserDefaultsResumeStore: ResumeStore  // ключ "resumeAfterUpdate", take() читает и удаляет
   ```
   `SafetyReason` делается `Codable`, если ещё не.
-- `UpdateModel.showsBadge`, `UpdateState`, `UpdateEvent` — как в ochre, плюс `UpdateState.waitingForLid(version: String)` и `UpdateEvent.waitingForOpenLid`: из `installing` → `waitingForLid`; `installing` снова → `installing`; `showsBadge` включает `waitingForLid`; `dismissed` из `waitingForLid` → `idle`.
+- `UpdateModel.showsBadge`, `UpdateState`, `UpdateEvent` — как в ochre, плюс `UpdateState.waitingForLid(version: String)` и `UpdateEvent.waitingForOpenLid`: из `installing` → `waitingForLid`; `installing` снова → `installing`; `showsBadge` включает `waitingForLid`; `dismissed` из `waitingForLid` → `idle`; приватные `version` и `isInstalling` учитывают `waitingForLid` (версия сохраняется в `installing`, ошибка в ожидании → `failed`).
 - ```swift
   /// Ответ Sparkle «ставить» отдаётся только при открытой крышке (spec §4).
   @MainActor public final class InstallGate {
       public init()
       /// Отдаёт reply сразу, если lidOpen; иначе хранит и возвращает false.
       @discardableResult public func ready(lidOpen: Bool, reply: @escaping () -> Void) -> Bool
-      /// Крышка открыта: отдать сохранённый reply (один раз).
-      public func lidOpened()
+      /// Крышка открыта: отдать сохранённый reply (один раз). true — отдан именно сейчас.
+      @discardableResult public func lidOpened() -> Bool
       public func cancel()   // dismiss: забыть reply
   }
   ```
 
-- [ ] **Step 1: Failing tests:** `UpdateStateTests` — перенести тесты ochre (`Tests/MetricsCoreTests/UpdateStateTests.swift`) целиком. `UpdateStateTests` дополнительно: `waitingForLidShowsBadge`, `dismissedFromWaitingIsIdle`. `InstallGateTests`: `installWaitsForOpenLid` (закрыта → reply не вызван; `lidOpened()` → вызван ровно раз; повторный `lidOpened()` — не вызван), `openLidRepliesAtOnce`, `cancelForgetsReply`. `ResumeSnapshotTests`: `freshSnapshotUsable` (59 с), `oldSnapshotUnusable` (121 с), `expiredEndUnusable`, `indefiniteUsable`, `takeReadsOnce` (второй `take()` → nil), `roundTripsSuspension` (`lidModeSuspendedReason = .thermal` переживает кодирование; подставь фактическое имя случая нагрева из `SafetyReason`).
+- [ ] **Step 1: Failing tests:** `UpdateStateTests` — перенести тесты ochre (`Tests/MetricsCoreTests/UpdateStateTests.swift`) целиком. `UpdateStateTests` дополнительно: `waitingForLidShowsBadge`, `dismissedFromWaitingIsIdle`, `waitingThenInstallingKeepsVersion`, `errorWhileWaitingFails`. `UpdateErrorsTests` — перенос из ochre. `InstallGateTests`: `installWaitsForOpenLid` (закрыта → reply не вызван; `lidOpened()` → вызван ровно раз и вернул `true`; повторный `lidOpened()` — не вызван, `false`), `repeatedOpenWithoutPendingDoesNothing`, `openLidRepliesAtOnce`, `cancelForgetsReply`. `ResumeSnapshotTests`: `freshSnapshotUsable` (59 с), `oldSnapshotUnusable` (121 с), `expiredEndUnusable`, `indefiniteUsable`, `takeReadsOnce` (второй `take()` → nil), `roundTripsSuspension` (`lidModeSuspendedReason = .thermal` переживает кодирование; подставь фактическое имя случая нагрева из `SafetyReason`).
 - [ ] **Step 2:** FAIL. **Step 3:** реализовать. **Step 4:** `make test` → PASS.
 - [ ] **Step 5: Commit** `feat(updates): update state and resume snapshot models`.
 
@@ -255,7 +292,7 @@ Spec §2, §3.2, §6.
 
 **Interfaces:**
 - Consumes: `UpdateModel`, `UpdateEvent`, `UpdateLocation` (Task 6).
-- Produces: `@MainActor @Observable final class UpdateController: NSObject, SPUUpdaterDelegate` с `model: UpdateModel`, `currentVersion`, `currentBuild`, `automaticallyChecks`, `start()`, `install()`, `checkNow()`; `init(feedOverride: String?, onShowPanel: @escaping () -> Void, lidIsOpen: @escaping @MainActor () -> Bool, onWillRelaunch: @escaping @MainActor () -> Void)`. `PanelUserDriver` как в ochre, плюс: `showReady(toInstallAndRelaunch:)` отдаёт ответ через `InstallGate.ready(lidOpen: lidIsOpen(), reply: { reply(.install) })`; если гейт придержал ответ — событие `.waitingForOpenLid`; `UpdateController.lidDidOpen()` → `gate.lidOpened()` и событие `.installing`; `dismissUpdateInstallation` → `gate.cancel()`.
+- Produces: `@MainActor @Observable final class UpdateController: NSObject, SPUUpdaterDelegate` с `model: UpdateModel`, `currentVersion`, `currentBuild`, `automaticallyChecks`, `start()`, `install()`, `checkNow()`; `init(feedOverride: String?, onShowPanel: @escaping () -> Void, lidIsOpen: @escaping @MainActor () -> Bool, onWillRelaunch: @escaping @MainActor () -> Void)`. `PanelUserDriver` как в ochre, плюс: `showReady(toInstallAndRelaunch:)` отдаёт ответ через `InstallGate.ready(lidOpen: lidIsOpen(), reply: { reply(.install) })`; если гейт придержал ответ — событие `.waitingForOpenLid`; `UpdateController.lidDidOpen()` → событие `.installing` только если `gate.lidOpened()` вернул `true` (обычные показания открытой крышки ничего не меняют — тест в Task 6 `repeatedOpenWithoutPendingDoesNothing`); `dismissUpdateInstallation` → `gate.cancel()`.
 - Делегат: `feedURLString(for:)` → `feedOverride`; `updater(_:shouldDownloadReleaseNotesForUpdate:)` → `false`; `updaterWillRelaunchApplication(_:)` → `onWillRelaunch()`; `didFinishUpdateCycleFor` — как в ochre.
 - `AppDelegate`: `-UpdateFeedURL` из argument domain (`UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)`), `UpdateController` создаётся после `SessionController`, `start()` после первого показания безопасности; `lidIsOpen` — `!(controller.readings?.lidClosed ?? false)`; при каждом `update(readings:)` с открытой крышкой — `updates.lidDidOpen()`.
 
@@ -301,7 +338,7 @@ Spec §4.
   - `resumeKeepsSafetySuspension`: снимок с паузой по нагреву → после `resume` и `update(readings:)` с нормальными показаниями `enableCalls == 0`, пауза та же.
   - `resumeReenablesLidModeThroughSafetyCheck`: снимок `lidModeActive` → первый `update(readings:)` без блокировки → `enable` вызван, `lidModeEnabledAt` прежний; с блокировкой (лимит на батарее) → пауза по правилу.
   - `resumeBlockedByLowBattery` → `false`, сессии нет.
-- [ ] **Step 2:** FAIL. **Step 3:** реализовать; `AppDelegate`: при запуске `UserDefaultsResumeStore().take()?.usable(now:)` → `controller.resume(_)` после первых показаний вместо `startOnLaunchIfEnabled()`; `onWillRelaunch` → `store.save(controller.snapshot(now:))`.
+- [ ] **Step 2:** FAIL. **Step 3:** реализовать; `AppDelegate`: при запуске один раз `let snapshot = UserDefaultsResumeStore().take()?.usable(now: Date())`; после первых показаний `if let snapshot, controller.resume(snapshot) {} else { controller.startOnLaunchIfEnabled() }`; `onWillRelaunch` → `if let s = controller.snapshot(now: Date()) { store.save(s) }`. Тесты на запуск: `missingSnapshotFallsBackToStartOnLaunch`, `staleSnapshotFallsBack`, `expiredSnapshotFallsBack` — логику выбора вынести в `SessionController.launch(resuming: ResumeSnapshot?)`, чтобы она тестировалась.
 - [ ] **Step 4:** `make test`, `make build` → PASS.
 - [ ] **Step 5: Commit** `feat(updates): a session on air carries over an update`.
 
@@ -313,7 +350,7 @@ Spec §6, §10.
 - Create: `scripts/make-appcast.sh`
 - Modify: `scripts/release.sh`, `project.yml` и `Makefile` (0.4.0), `README.md`, `README.ru.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `PRODUCT.md`, `SECURITY.md`
 
-- [ ] **Step 1:** `make-appcast.sh <dmg> <версия> <сборка>` по образцу ochre: `sign_update` ищется в `build/DerivedData/SourcePackages/artifacts`; без `releaseNotesLink`; `<link>` элемента — страница релиза; `minimumSystemVersion` 14.0; `enclosure` на `https://github.com/aesarva/lidless/releases/download/v<версия>/Lidless-<версия>.dmg`.
+- [ ] **Step 1:** `make-appcast.sh <dmg> <версия> <сборка>` по образцу ochre: `sign_update` ищется в `build/DerivedData/SourcePackages/artifacts`; без `releaseNotesLink`; `<link>` элемента — страница релиза; `minimumSystemVersion` 14.0; `enclosure` на `${DOWNLOAD_BASE:-https://github.com/aesarva/lidless/releases/download/v<версия>}/Lidless-<версия>.dmg` (переменная `DOWNLOAD_BASE` — для локальной проверки, Task 11).
 - [ ] **Step 2:** `release.sh`: перед лентой — проверка, что приложение, `Contents/MacOS/LidlessHelper` и `Sparkle.framework` подписаны Team ID `6H45P75YYV` (`codesign -dv` → `TeamIdentifier=6H45P75YYV`) и `spctl` принял приложение и DMG; иначе выход с ошибкой; затем `make-appcast.sh … > dist/appcast.xml` и `xmllint --noout`. В режиме `--unsigned` ленты нет. Номер сборки — тот же `git rev-list --count HEAD`.
 - [ ] **Step 3:** версия 0.4.0 в `project.yml` и `Makefile`; CHANGELOG `## 0.4.0 — Unreleased` (обновления; продолжение эфира; пункты §8 простыми словами).
 - [ ] **Step 4:** README en/ru (синхронно): «Возможности» — обновления; FAQ «Does Lidless send any data?» — одно чтение ленты на GitHub в сутки, без данных о системе, отключается; «How do I update?» — 0.3.0 один раз вручную; бейджи и раздел помощника без изменений. CONTRIBUTING: ключ EdDSA (`generate_keys`, `-x` — резервная копия), три файла в релизе (`gh release create … dist/appcast.xml`), `-UpdateFeedURL`, проверка обновления в чек-листе. PRODUCT.md: сетевой запрос и обновления. SECURITY.md: обновления подписаны EdDSA и Developer ID.
@@ -325,7 +362,7 @@ Spec §6, §10.
 Spec §9. Выполняет контроллер с пользователем, не исполнитель.
 
 - [ ] Ad-hoc `make app` запускается и грузит Sparkle (лог `updates`, нет «different Team IDs»).
-- [ ] Подписанная сборка N в `/Applications`-подобном месте (`build/old/Lidless.app`), эфир с режимом крышки; новая сборка N+1 (пустой коммит в ветке или `CURRENT_PROJECT_VERSION`), её DMG и лента через `make-appcast.sh`, `python3 -m http.server` на `127.0.0.1`; старая запущена с `-UpdateFeedURL http://127.0.0.1:<порт>/appcast.xml`.
+- [ ] Подписанная сборка N в `/Applications`-подобном месте (`build/old/Lidless.app`), эфир с режимом крышки; новая сборка N+1 (пустой коммит в ветке или `CURRENT_PROJECT_VERSION`), её DMG и лента через `DOWNLOAD_BASE=http://127.0.0.1:<порт> make-appcast.sh` (проверить `enclosure url` в ленте), `python3 -m http.server` на `127.0.0.1`; старая запущена с `-UpdateFeedURL http://127.0.0.1:<порт>/appcast.xml`.
 - [ ] Строка и синяя точка; «Установить» → N+1 запущена; эфир с тем же концом; режим крышки снова включён; вкладка Helper — сборка N+1.
 - [ ] Крышку закрыть во время скачивания → «Установится, когда откроешь крышку», Mac не спит; открыть → ставится.
 - [ ] DMG с испорченной подписью → «Не удалось обновить».
