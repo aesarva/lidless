@@ -25,16 +25,21 @@ import LidlessCore
     func enable() throws {}
     func disable() throws {}
     func recoverIfNeeded() -> Bool { true }
+    func connectionLost(generation: UInt64) -> Bool { false }
 }
 
 final class PreviewBackend: PrivilegedBackend {
     let current: HelperStatus
     init(_ s: HelperStatus) { current = s }
     func status() -> HelperStatus { current }
+    func refreshInfo() {}
     func install() throws {}
     func uninstall() throws {}
-    func setSleepDisabled(_ disabled: Bool) throws {}
+    func setSleepDisabled(_ disabled: Bool) throws -> UInt64 { 0 }
     func isSleepDisabled() throws -> Bool { false }
+    func legacyHelperPresent() -> Bool { false }
+    func removeLegacyHelper() throws -> [String] { [] }
+    func openSystemSettings() {}
 }
 
 @MainActor func previewController(
@@ -90,7 +95,15 @@ func previewReadings(battery: Int? = 82, onBattery: Bool = false, thermal: Therm
     return previewView(c)
 }
 
-#Preview("Needs helper") {
+#Preview("Helper not set up") {
     previewView(previewController(readings: previewReadings()), helper: .notInstalled)
+}
+
+#Preview("Helper needs approval") {
+    previewView(previewController(lid: true, readings: previewReadings()), helper: .needsApproval)
+}
+
+#Preview("Unsigned build") {
+    previewView(previewController(readings: previewReadings()), helper: .unsigned)
 }
 #endif

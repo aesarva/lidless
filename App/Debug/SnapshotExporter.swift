@@ -17,13 +17,23 @@ enum SnapshotExporter {
                     snapshot(popoverStage(view), appearance: appearance,
                              to: dir.appendingPathComponent("popover-\(name)-\(suffix).png"))
                 }
-                for (name, tab) in [("general", SettingsTab.general), ("safety", .safety),
-                                    ("helper", .helper), ("about", .about)] {
+                let migrated = HelperModel(backend: PreviewBackend(.installed))
+                migrated.previewLegacy(removed: true)
+                let legacyFailed = HelperModel(backend: PreviewBackend(.installed))
+                legacyFailed.previewLegacy(removed: false, error: "cannot unlink /etc/sudoers.d/lidless: Operation not permitted")
+                for (name, tab, helper) in [
+                    ("general", SettingsTab.general, HelperModel(backend: PreviewBackend(.installed))),
+                    ("safety", .safety, HelperModel(backend: PreviewBackend(.installed))),
+                    ("helper", .helper, migrated),
+                    ("helper-needs-approval", .helper, HelperModel(backend: PreviewBackend(.needsApproval))),
+                    ("helper-unsigned", .helper, HelperModel(backend: PreviewBackend(.unsigned))),
+                    ("helper-legacy-error", .helper, legacyFailed),
+                    ("about", .about, HelperModel(backend: PreviewBackend(.installed))),
+                ] {
                     let nav = SettingsNavigation()
                     nav.tab = tab
                     let view = SettingsView(controller: previewController(readings: previewReadings()),
-                                            helper: HelperModel(backend: PreviewBackend(.installed)),
-                                            loginItem: LoginItem(), navigation: nav)
+                                            helper: helper, loginItem: LoginItem(), navigation: nav)
                         .background(Color(nsColor: .windowBackgroundColor))
                     snapshot(view, appearance: appearance,
                              to: dir.appendingPathComponent("settings-\(name)-\(suffix).png"))
@@ -55,7 +65,11 @@ enum SnapshotExporter {
             ("timer-lid", view(timerLid)),
             ("blocked", view(blocked)),
             ("lid-paused", view(paused)),
-            ("needs-helper", view(previewController(readings: previewReadings()), helper: .notInstalled)),
+            ("not-set-up", view(previewController(readings: previewReadings()), helper: .notInstalled)),
+            ("needs-approval", view(previewController(lid: true, readings: previewReadings()), helper: .needsApproval)),
+            ("unsigned", view(previewController(readings: previewReadings()), helper: .unsigned)),
+            ("helper-error", view(previewController(lid: true, readings: previewReadings()),
+                                  helper: .error("helper version 0.2.9 does not match Lidless 0.3.0"))),
         ]
     }
 

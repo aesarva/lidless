@@ -3,6 +3,12 @@ options:
   bundleIdPrefix: io.github.aesarva
   deploymentTarget:
     macOS: "14.0"
+# One version for the app and the daemon: a mismatch makes the app re-register the daemon on
+# every launch. Both targets inherit these.
+settings:
+  base:
+    MARKETING_VERSION: "0.3.0"
+    CURRENT_PROJECT_VERSION: "1"
 packages:
   LidlessCore:
     path: Packages/LidlessCore
@@ -13,21 +19,15 @@ targets:
     deploymentTarget: "14.0"
     sources:
       - path: App
-      # Explicit files (not the folder) so Helper/tests/ is not bundled.
-      - path: Helper/install.sh
+      # launchd plist of the daemon, registered via SMAppService.daemon(plistName:).
+      - path: LidlessHelper/io.github.aesarva.Lidless.helper.plist
         buildPhase:
-          copyFiles: {destination: resources, subpath: Helper}
-      - path: Helper/uninstall.sh
-        buildPhase:
-          copyFiles: {destination: resources, subpath: Helper}
-      - path: Helper/watchdog.sh
-        buildPhase:
-          copyFiles: {destination: resources, subpath: Helper}
-      - path: Helper/app.lidless.watchdog.plist
-        buildPhase:
-          copyFiles: {destination: resources, subpath: Helper}
+          copyFiles: {destination: wrapper, subpath: Contents/Library/LaunchDaemons}
     dependencies:
       - package: LidlessCore
+      - target: LidlessHelper
+        embed: true
+        copy: {destination: executables}
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.aesarva.Lidless
@@ -40,5 +40,23 @@ targets:
         LOCALIZATION_PREFERS_STRING_CATALOGS: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_HARDENED_RUNTIME: YES
-        CURRENT_PROJECT_VERSION: "1"
-        MARKETING_VERSION: "0.2.0"
+  LidlessHelper:
+    type: tool
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: LidlessHelper
+        excludes:
+          - "*.plist"
+    dependencies:
+      - package: LidlessCore
+    settings:
+      base:
+        PRODUCT_NAME: LidlessHelper
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.aesarva.Lidless.helper
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        ENABLE_HARDENED_RUNTIME: YES
+        SKIP_INSTALL: YES
+        SWIFT_VERSION: "6.0"
+        CODE_SIGN_IDENTITY: "-"

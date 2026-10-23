@@ -3,9 +3,8 @@ export DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
 .PHONY: test
 test:
 	cd Packages/LidlessCore && swift test
-	shellcheck scripts/*.sh Helper/*.sh Helper/tests/*.sh
-	bash Helper/tests/watchdog_test.sh
-	plutil -lint Helper/app.lidless.watchdog.plist
+	shellcheck scripts/*.sh
+	plutil -lint LidlessHelper/io.github.aesarva.Lidless.helper.plist
 
 .PHONY: generate build run
 generate:
@@ -24,6 +23,6 @@ app:
 
 # DMG without Developer ID: make dmg VERSION=0.1.0 → dist/Lidless-0.1.0.dmg.
 # Signed + notarized release: scripts/release.sh <version>.
-VERSION ?= 0.2.0
+VERSION ?= 0.3.0
 dmg:
 	scripts/release.sh $(VERSION) --unsigned

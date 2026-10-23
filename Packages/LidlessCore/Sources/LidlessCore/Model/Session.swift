@@ -9,6 +9,8 @@ public enum StopReason: Equatable, Sendable {
 }
 
 public struct Session: Equatable, Sendable {
+    /// Stays the same for the whole session, across restart and extend (startedAt does not).
+    public let id: UUID
     public var startedAt: Date
     public var endsAt: Date?
     public var keepDisplayOn: Bool
@@ -21,6 +23,7 @@ public struct Session: Equatable, Sendable {
     public var endingSoonNotified: Bool
 
     public init(
+        id: UUID = UUID(),
         startedAt: Date,
         endsAt: Date? = nil,
         keepDisplayOn: Bool = false,
@@ -29,6 +32,7 @@ public struct Session: Equatable, Sendable {
         lidModeSuspendedReason: SafetyReason? = nil,
         endingSoonNotified: Bool = false
     ) {
+        self.id = id
         self.startedAt = startedAt
         self.endsAt = endsAt
         self.keepDisplayOn = keepDisplayOn
@@ -42,4 +46,13 @@ public struct Session: Equatable, Sendable {
 public enum SessionState: Equatable, Sendable {
     case off
     case active(Session)
+}
+
+/// Closed-lid mode as it was before a helper removal (`SessionController.beginHelperRemoval`).
+public struct LidModeRestorePoint: Equatable, Sendable {
+    /// The session it belongs to (nil: none was running).
+    public let sessionID: UUID?
+    public let lidModeEnabled: Bool
+    public let wasActive: Bool
+    public let suspendedReason: SafetyReason?
 }

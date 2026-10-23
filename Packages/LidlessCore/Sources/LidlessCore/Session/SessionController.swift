@@ -28,6 +28,11 @@ import os
     public var settings: LidlessSettings {
         didSet { settingsStore.save(settings) }
     }
+    /// Asks for a background check of a helper in error (the app's `HelperCoordinator.refresh`),
+    /// which calls `helperDidChange` once it is installed again. Called later on the main
+    /// actor, never from inside the call that asked, and once for any requests in one turn.
+    @ObservationIgnored public var onHelperRefreshNeeded: (() -> Void)?
+    @ObservationIgnored private var helperRefreshScheduled = false
 
     public var session: Session? {
         if case .active(let s) = state { return s }
@@ -71,7 +76,7 @@ import os
             endingSoonNotified: Self.isWithinWarning(endsAt, now: now)
         ))
         startBlock = nil
-        if settings.lidModeEnabled { enableLidMode() }
+        if settings.lidModeEnabled { enableLidMode(quietUntilApproved: true) }
         return true
     }
 
@@ -142,7 +147,7 @@ import os
         guard let s = session else { return }
         if on {
             guard !s.lidModeActive else { return }
-            enableLidMode()
+            enableLidMode(quietUntilApproved: true)
         } else {
             if disableLidHandlingFailure() {
                 mutateSession {
@@ -150,6 +155,36 @@ import os
                     $0.lidModeSuspendedReason = nil
                 }
             }
+        }
+    }
+
+    /// Turns lid mode off before the helper is removed (while the helper can still do it) and
+    /// returns what to bring back if the removal fails.
+    public func beginHelperRemoval() -> LidModeRestorePoint {
+        let point = LidModeRestorePoint(
+            sessionID: session?.id,
+            lidModeEnabled: settings.lidModeEnabled,
+            wasActive: session?.lidModeActive ?? false,
+            suspendedReason: session?.lidModeSuspendedReason
+        )
+        setLidMode(false)
+        return point
+    }
+
+    /// The helper removal failed: the setting comes back, a safety suspension comes back as
+    /// it was, and lid mode that was on (or waiting for the helper) is left to the
+    /// safety-checked retry, which keeps its original start time. Nothing is acquired here.
+    /// Only the setting comes back for another session, or when a safety rule suspended lid
+    /// mode meanwhile: that suspension stays until the user turns lid mode on again.
+    public func restoreAfterFailedRemoval(_ point: LidModeRestorePoint) {
+        settings.lidModeEnabled = point.lidModeEnabled
+        guard point.lidModeEnabled, let s = session, s.id == point.sessionID,
+              !s.lidModeActive else { return }
+        if let current = s.lidModeSuspendedReason, current != .helperUnavailable { return }
+        if let reason = point.suspendedReason, reason != .helperUnavailable {
+            mutateSession { $0.lidModeSuspendedReason = reason }
+        } else if point.wasActive || point.suspendedReason == .helperUnavailable {
+            mutateSession { $0.lidModeSuspendedReason = .helperUnavailable }
         }
     }
 
@@ -191,6 +226,7 @@ import os
                 notifier.post(.lidModeSuspended(r))
             }
         }
+        retryHelperSuspendedLidMode()
         handleLidTransition(closed: readings.lidClosed)
     }
 
@@ -199,7 +235,7 @@ import os
         attention = recoveryPending ? .helperUnavailable : nil
     }
 
-    /// Resets a stale lid-mode marker. Call before the safety engine starts.
+    /// Undoes a closed-lid mode left behind by an earlier run. Call before the safety engine starts.
     public func recoverAtLaunch() {
         attemptRecovery()
     }
@@ -211,10 +247,42 @@ import os
         }
     }
 
-    /// Call after the helper was installed or removed: retries a pending lid recovery.
+    /// Call after the helper was installed or removed: retries a pending lid recovery, or
+    /// closed-lid mode that is waiting for the helper.
     public func helperDidChange() {
-        guard case .off = state else { return }
+        guard case .off = state else {
+            retryHelperSuspendedLidMode()
+            return
+        }
         attemptRecovery()
+    }
+
+    /// Call when the daemon connection of `generation` dropped. If that ended this app's hold
+    /// on `disablesleep`, active closed-lid mode is applied again unless the safety rules would
+    /// suspend it (then it is suspended for that reason). If re-applying fails, lid mode is
+    /// suspended as `.helperUnavailable` and the next readings retry it. A late report about
+    /// an older connection (lid mode re-acquired since) is ignored.
+    public func helperConnectionLost(generation: UInt64) {
+        guard lid.connectionLost(generation: generation) else { return }
+        guard let s = session, s.lidModeActive else { return }
+        guard settings.lidModeEnabled else {
+            // A failed disable left lid mode marked active: the daemon has now done it.
+            mutateSession {
+                $0.lidModeActive = false
+                $0.lidModeSuspendedReason = nil
+            }
+            recoveryPending = false
+            if attention == .helperUnavailable { attention = nil }
+            return
+        }
+        if let reason = safetyBlock(s) {
+            suspendLidMode(reason)
+        } else if !enableLidMode(keepingStart: true) {
+            mutateSession {
+                $0.lidModeActive = false
+                $0.lidModeSuspendedReason = .helperUnavailable
+            }
+        }
     }
 
     // MARK: - Private
@@ -260,7 +328,7 @@ import os
         }
     }
 
-    /// While off: retries resetting a stale lid-mode marker. On failure raises and posts
+    /// While off: retries undoing a leftover closed-lid mode. On failure raises and posts
     /// `.helperUnavailable` once; on success leaves attention untouched.
     private func attemptRecovery() {
         recoveryPending = !lid.recoverIfNeeded()
@@ -273,21 +341,106 @@ import os
         notifier.post(.lidModeSuspended(.helperUnavailable))
     }
 
-    private func enableLidMode() {
+    /// `keepingStart`: automatic recovery keeps `lidModeEnabledAt`, so the battery time limit
+    /// is not restarted. The user's own enable starts a new interval, even if it fails, so the
+    /// automatic retry after it is judged by the new interval. `quietUntilApproved`: the
+    /// user's own enable or a session start, before the helper is set up or allowed, just
+    /// waits; losing a hold that way (e.g. the helper switched off in Login Items) is reported.
+    /// A helper in error is not called either (it would only time out, on the main thread),
+    /// but is always reported: lid mode the user expects is not on.
+    @discardableResult
+    private func enableLidMode(keepingStart: Bool = false, quietUntilApproved: Bool = false) -> Bool {
+        mutateSession {
+            if !keepingStart || $0.lidModeEnabledAt == nil { $0.lidModeEnabledAt = clock.now }
+        }
+        let status = lid.helperStatus()
+        switch status {
+        case .notInstalled, .needsApproval, .error:
+            // Nothing to call yet; `helperDidChange` / the poll retry turn it on later. A
+            // helper in error is checked again in the background (which re-registers it).
+            mutateSession {
+                if !$0.lidModeActive { $0.lidModeSuspendedReason = .helperUnavailable }
+            }
+            if case .error = status {
+                raiseHelperUnavailable()
+                requestHelperRefresh()
+            } else if !quietUntilApproved {
+                raiseHelperUnavailable()
+            }
+            return false
+        case .installed, .unsigned:
+            break
+        }
         do {
             try lid.enable()
             mutateSession {
                 $0.lidModeActive = true
-                $0.lidModeEnabledAt = clock.now
                 $0.lidModeSuspendedReason = nil
             }
+            return true
         } catch {
             log.error("lid enable failed: \(String(describing: error), privacy: .public)")
             mutateSession {
                 if !$0.lidModeActive { $0.lidModeSuspendedReason = .helperUnavailable }
             }
             raiseHelperUnavailable()
+            return false
         }
+    }
+
+    /// Deferred: a refresh may find the helper installed at once and call `helperDidChange`,
+    /// which must not run inside `enableLidMode` (it would take lid mode there, and the outer
+    /// call would then report a failure over it).
+    private func requestHelperRefresh() {
+        guard !helperRefreshScheduled else { return }
+        helperRefreshScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            helperRefreshScheduled = false
+            onHelperRefreshNeeded?()
+        }
+    }
+
+    /// Lid mode the user wants but the helper could not apply: try again, unless the safety
+    /// rules would suspend it right away (then it is suspended for that reason instead). A
+    /// helper that is not set up cannot answer, so it is not asked until it is
+    /// (`helperDidChange`); one in error is checked again in the background (`enableLidMode`).
+    private func retryHelperSuspendedLidMode() {
+        guard let s = session, settings.lidModeEnabled, !s.lidModeActive,
+              s.lidModeSuspendedReason == .helperUnavailable else { return }
+        switch lid.helperStatus() {
+        case .installed, .error: break
+        case .notInstalled, .needsApproval, .unsigned: return
+        }
+        if let reason = safetyBlock(s) {
+            suspendLidMode(reason)
+        } else {
+            enableLidMode(keepingStart: true)
+        }
+    }
+
+    /// Why the safety rules would stop lid mode if it were active now, with its original
+    /// start time; nil when they would not (or there are no readings yet).
+    private func safetyBlock(_ s: Session) -> SafetyReason? {
+        guard let readings else { return nil }
+        var enabled = s
+        enabled.lidModeActive = true
+        enabled.lidModeEnabledAt = s.lidModeEnabledAt ?? clock.now
+        switch SafetyPolicy.evaluate(readings, session: enabled, settings: settings.safety) {
+        case .none: return nil
+        case .suspendLidMode(let r), .stopSession(let r): return r
+        }
+    }
+
+    /// Suspends lid mode that this app does not hold (nothing to disable), like a safety
+    /// suspension: the next readings stop the session if the reason calls for that.
+    private func suspendLidMode(_ reason: SafetyReason) {
+        mutateSession {
+            $0.lidModeActive = false
+            $0.lidModeSuspendedReason = reason
+        }
+        attention = reason
+        notifier.post(.lidModeSuspended(reason))
     }
 
     private func mutateSession(_ body: (inout Session) -> Void) {

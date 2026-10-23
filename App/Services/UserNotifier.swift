@@ -56,8 +56,10 @@ final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
             case .lidOnBatteryLimit:
                 let limit = DurationFormat.label(minutes: safetySettings().lidLimitMinutes)
                 content.title = String(localized: "Closed-lid mode paused after \(limit) on battery")
-            case .helperUnavailable, .lowBattery:
-                content.title = String(localized: "Closed-lid mode unavailable — reinstall the helper in Settings")
+            case .lowBattery:
+                content.title = String(localized: "Closed-lid mode paused: low battery")
+            case .helperUnavailable:
+                content.title = String(localized: "Closed-lid mode unavailable — check the helper in Settings")
             }
         case .assertionFailed(let message):
             content.title = String(localized: "Couldn't keep Mac awake: \(message)")
