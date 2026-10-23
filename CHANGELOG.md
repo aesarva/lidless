@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 — Unreleased
+## 0.3.0 — 2026-10-24
 
 - The privileged helper is now a daemon registered through `SMAppService`: approve it once in System Settings → General → Login Items & Extensions, with no administrator password and no sudoers rule.
 - Normal sleep returns at once when Lidless quits, crashes or is force-quit; a reboot mid-session is reset at boot; if the helper crashes, macOS starts it again and closed-lid mode is re-applied; switching Lidless off in Login Items makes macOS quit it, which restores normal sleep.
