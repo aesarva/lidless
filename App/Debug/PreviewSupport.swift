@@ -32,6 +32,15 @@ final class PreviewBackend: PrivilegedBackend {
     let current: HelperStatus
     init(_ s: HelperStatus) { current = s }
     func status() -> HelperStatus { current }
+    func lastInfo() -> HelperInfo? {
+        guard current == .installed else { return nil }
+        return HelperInfo(version: Bundle.main.shortVersion, build: Bundle.main.buildVersion,
+                          sleepDisabled: false, owned: false)
+    }
+    func freshInfo() throws -> HelperInfo {
+        guard let info = lastInfo() else { throw HelperError.commandFailed("preview") }
+        return info
+    }
     func refreshInfo() {}
     func install() throws {}
     func uninstall() throws {}

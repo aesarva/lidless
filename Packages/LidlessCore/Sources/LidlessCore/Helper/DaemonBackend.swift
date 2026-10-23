@@ -10,16 +10,24 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     private let registration: HelperRegistration
     private let client: HelperClient?
     private let appVersion: String
+    private let appBuild: String
     private let legacy: LegacyHelperCleaner
     /// Pause before each check of a re-registered daemon (it restarts first).
     private let verifyDelay: TimeInterval
     private static let verifyAttempts = 3
     /// How long a re-registration waits for launchd to confirm the old daemon is gone.
     private let unregisterWait: TimeInterval
+    /// Pause before asking a daemon that timed out once more.
+    private let retryDelay: TimeInterval
     private let log = Logger(subsystem: HelperIDs.app, category: "helper")
     private let lock = NSLock()
     /// What the last `refreshInfo()` found wrong with an enabled daemon; nil until one does.
     private var infoError: String?
+    /// The daemon's last successful answer for the current registration (`lastInfo()`).
+    private var answer: HelperInfo?
+    /// The daemon of the current registration answered with this app's version and build:
+    /// `.installed` rather than `.checking`.
+    private var verified = false
     /// Where the once-per-launch re-registration of a daemon that failed a check stands. A
     /// step that failed is retried by the next `refreshInfo()`, not forbidden for the launch.
     private enum Reregistration { case none, unregisterPending, registerPending, done }
@@ -39,14 +47,17 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     private let mutationLock = NSLock()
 
     public init(registration: HelperRegistration, client: HelperClient?, appVersion: String,
+                appBuild: String,
                 legacy: LegacyHelperCleaner = LegacyHelperCleaner(), verifyDelay: TimeInterval = 1,
-                unregisterWait: TimeInterval = 10) {
+                unregisterWait: TimeInterval = 10, retryDelay: TimeInterval = 1) {
         self.registration = registration
         self.client = client
         self.appVersion = appVersion
+        self.appBuild = appBuild
         self.legacy = legacy
         self.verifyDelay = verifyDelay
         self.unregisterWait = unregisterWait
+        self.retryDelay = retryDelay
     }
 
     /// Fires with a connection's generation after it dropped (timeout, idle exit, crash): what
@@ -65,8 +76,17 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
             // Unregistered by a re-registration that is still to be completed: say why.
             return lock.withLock { reregistrationPending ? infoError : nil }.map { .error($0) } ?? .notInstalled
         case .requiresApproval: return .needsApproval
-        case .enabled: return lock.withLock { infoError }.map { .error($0) } ?? .installed
+        case .enabled:
+            return lock.withLock { infoError.map { .error($0) } ?? (verified ? .installed : .checking) }
         }
+    }
+
+    public func lastInfo() -> HelperInfo? {
+        lock.withLock { answer }
+    }
+
+    public func freshInfo() throws -> HelperInfo {
+        try withClient { try $0.info() }
     }
 
     public func refreshInfo() {
@@ -75,9 +95,13 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         let problem: String?
         if lock.withLock({ reregistrationPending }) {
             // Unregistered (or never confirmed) by a re-registration that did not finish.
-            problem = reregister(client, because: lock.withLock { reregistrationReason }, retry: true)
+            problem = reregister(client, because: lock.withLock { reregistrationReason }, startedIn: startedIn,
+                                 retry: true)
         } else if registration.status == .enabled {
-            problem = check(client).flatMap { reregister(client, because: $0) }
+            problem = check(client, startedIn: startedIn).flatMap { failure in
+                failure.callsForReregistration
+                    ? reregister(client, because: failure.message, startedIn: startedIn) : failure.message
+            }
         } else {
             return
         }
@@ -94,33 +118,84 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         reregistration == .unregisterPending || reregistration == .registerPending
     }
 
-    /// What is wrong with the enabled daemon, or nil when it answers with this app's version.
-    private func check(_ client: HelperClient) -> String? {
+    /// Why an enabled daemon failed a check. Only a daemon from another build or one that
+    /// cannot be reached is re-registered; one that answers with an error is not.
+    private enum Failure {
+        /// Another version or build.
+        case mismatch(String)
+        /// The connection dropped with the call unanswered (`HelperError.rejected`).
+        case dropped(String)
+        /// No reply twice in a row.
+        case timedOut
+        /// The daemon answered with an error (pmset -g failed), or anything else.
+        case failed(String)
+
+        var message: String {
+            switch self {
+            case .mismatch(let text), .dropped(let text), .failed(let text): text
+            case .timedOut: HelperError.timedOut.message
+            }
+        }
+
+        var callsForReregistration: Bool {
+            if case .failed = self { return false }
+            return true
+        }
+    }
+
+    /// What is wrong with the enabled daemon, or nil when it answers with this app's version
+    /// and build. The answer counts for the registration of `generation` only.
+    private func check(_ client: HelperClient, startedIn generation: UInt64) -> Failure? {
+        let info: HelperInfo
         do {
-            let info = try client.info()
-            if info.version == appVersion { return nil }
-            return "helper version \(info.version) does not match Lidless \(appVersion)"
+            info = try infoRetryingTimeout(client)
         } catch HelperError.rejected(let message) {
             // Most likely a daemon from another build whose interface differs.
-            return "helper dropped the connection: \(message)"
+            return .dropped("helper dropped the connection: \(message)")
+        } catch HelperError.timedOut {
+            return .timedOut
         } catch {
-            return HelperError.message(for: error)
+            return .failed(HelperError.message(for: error))
+        }
+        lock.withLock {
+            // The user installed or removed the helper meanwhile: this is about the old one.
+            guard registrationGeneration == generation else { return }
+            answer = info
+            verified = info.version == appVersion && info.build == appBuild
+        }
+        if info.version != appVersion {
+            return .mismatch("helper version \(info.version) does not match Lidless \(appVersion)")
+        }
+        if info.build != appBuild {
+            return .mismatch("helper build \(info.build) does not match Lidless build \(appBuild)")
+        }
+        return nil
+    }
+
+    /// A single timeout may be a daemon that is busy or just starting: ask once more.
+    private func infoRetryingTimeout(_ client: HelperClient) throws -> HelperInfo {
+        do {
+            return try client.info()
+        } catch HelperError.timedOut {
+            if retryDelay > 0 { Thread.sleep(forTimeInterval: retryDelay) }
+            return try client.info()
         }
     }
 
     private enum Outcome { case reregistered, refused, alreadyDone }
 
-    /// An enabled daemon that fails a check: one left over from another app version (an
-    /// in-place update), one that drops the connection unanswered, or a job launchd removed
-    /// after it kept failing while SMAppService still reports it enabled (info() only times
-    /// out). Re-register so launchd starts the bundled one, then check the replacement:
-    /// unregister, wait for launchd to confirm the old daemon is gone, register. A step that
-    /// fails is retried from there by the next call (`refreshInfo()`, `install()`); once the
-    /// whole sequence has gone through, it is not repeated in this launch. Unregistering
-    /// sends the old daemon SIGTERM, which interrupts the client's connection; the client
-    /// drops it and the next call opens a new one, so no explicit reconnect is needed.
-    /// Returns the problem left, if any.
-    private func reregister(_ client: HelperClient, because failure: String, retry: Bool = false) -> String? {
+    /// An enabled daemon that fails a check: one left over from another app version or build
+    /// (an in-place update), one that drops the connection unanswered, or a job launchd
+    /// removed after it kept failing while SMAppService still reports it enabled (info() only
+    /// times out, twice in a row). Re-register so launchd starts the bundled one, then check
+    /// the replacement: unregister, wait for launchd to confirm the old daemon is gone,
+    /// register. A step that fails is retried from there by the next call (`refreshInfo()`,
+    /// `install()`); once the whole sequence has gone through, it is not repeated in this
+    /// launch. Unregistering sends the old daemon SIGTERM, which interrupts the client's
+    /// connection; the client drops it and the next call opens a new one, so no explicit
+    /// reconnect is needed. Returns the problem left, if any.
+    private func reregister(_ client: HelperClient, because failure: String, startedIn generation: UInt64,
+                            retry: Bool = false) -> String? {
         var problem = failure
         let outcome: Outcome = mutationLock.withLock {
             // The user's uninstall may have run between info() and here.
@@ -150,13 +225,13 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         switch outcome {
         case .refused: return problem
         // Another refresh finished it meanwhile; `failure` may be a stale reason.
-        case .alreadyDone: return retry ? check(client) : failure
+        case .alreadyDone: return retry ? check(client, startedIn: generation)?.message : failure
         case .reregistered: break
         }
         for _ in 0..<Self.verifyAttempts {
             if verifyDelay > 0 { Thread.sleep(forTimeInterval: verifyDelay) }
-            guard let message = check(client) else { return nil }
-            problem = "after re-registering: \(message)"
+            guard let failure = check(client, startedIn: generation) else { return nil }
+            problem = "after re-registering: \(failure.message)"
         }
         return problem
     }
@@ -164,6 +239,11 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     /// The pending steps of a re-registration, from where the last attempt stopped; on
     /// failure the state stays, so the next attempt resumes. Call under `mutationLock`.
     private func finishReregistration() throws {
+        // The old daemon's answer is not about the replacement: checking until it answers.
+        lock.withLock {
+            answer = nil
+            verified = false
+        }
         if lock.withLock({ reregistration }) == .unregisterPending {
             try awaitUnregister()
             lock.withLock { reregistration = .registerPending }
@@ -217,6 +297,8 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         let pending = lock.withLock { () -> Bool in
             userRemoved = false
             registrationGeneration += 1
+            answer = nil
+            verified = false
             if !reregistrationPending { infoError = nil }
             return reregistrationPending
         }
@@ -241,6 +323,8 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         mutationLock.lock(); defer { mutationLock.unlock() }
         lock.withLock {
             infoError = nil
+            answer = nil
+            verified = false
             userRemoved = true
             reregistration = .none
             outstandingUnregister = nil

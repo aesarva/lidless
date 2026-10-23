@@ -16,7 +16,8 @@ public struct HelperInfo: Equatable, Sendable {
 }
 
 /// Synchronous calls to the privileged daemon. Errors are `HelperError.rejected` when the
-/// daemon dropped the connection unanswered, otherwise `HelperError.commandFailed`.
+/// daemon dropped the connection unanswered, `HelperError.timedOut` when no reply came in
+/// time, otherwise `HelperError.commandFailed` (the daemon answered with an error).
 /// Connections are numbered (generations, increasing from 1): the daemon ties a hold to the
 /// connection that took it and releases it when that connection closes.
 public protocol HelperClient: AnyObject, Sendable {
@@ -169,7 +170,7 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
             send(helper) { finish(.success($0)) }
         }
         if done.wait(timeout: .now() + timeout) == .timedOut,
-           outcome.fill(.failure(.commandFailed("timed out"))) {
+           outcome.fill(.failure(.timedOut)) {
             drop(current)
         }
         guard let result = outcome.result else { throw HelperError.commandFailed("no reply") }

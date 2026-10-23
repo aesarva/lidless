@@ -80,7 +80,19 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
         set { lock.withLock { _statusAfterRefresh = newValue } }
     }
 
+    private var _lastInfo: HelperInfo?
+    /// What `lastInfo()` and `freshInfo()` answer.
+    var stubInfo: HelperInfo? {
+        get { lock.withLock { _lastInfo } }
+        set { lock.withLock { _lastInfo = newValue } }
+    }
+
     func status() -> HelperStatus { stubStatus }
+    func lastInfo() -> HelperInfo? { stubInfo }
+    func freshInfo() throws -> HelperInfo {
+        guard let info = stubInfo else { throw HelperError.commandFailed("no info") }
+        return info
+    }
     func refreshInfo() {
         lock.withLock {
             _refreshInfoCalls += 1

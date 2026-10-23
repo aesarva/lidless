@@ -224,12 +224,14 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         #expect(throws: HelperError.commandFailed("pmset -g failed")) { try client.info() }
     }
 
-    @Test func silentServiceTimesOut() {
+    /// No reply within the timeout is `.timedOut`, not a reply with an error: the backend
+    /// re-registers after two in a row, never after an error reply.
+    @Test func timeoutThrowsTimedOut() {
         let harness = Harness()
         harness.service.hang = true
         let client = harness.makeClient(timeout: 0.3)
         let time = elapsed {
-            #expect(throws: HelperError.commandFailed("timed out")) { try client.info() }
+            #expect(throws: HelperError.timedOut) { try client.info() }
         }
         #expect(time < 1.3)
     }
@@ -240,7 +242,7 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         let client = harness.makeClient(timeout: 0.3)
         let lost = Counter()
         client.onConnectionLost = { _ in lost.increment() }
-        #expect(throws: HelperError.commandFailed("timed out")) { try client.info() }
+        #expect(throws: HelperError.timedOut) { try client.info() }
         #expect(lost.fired.wait(timeout: .now() + 2) == .success)
         // The invalidated connection's own handler runs too; it must not report again.
         Thread.sleep(forTimeInterval: 0.2)
@@ -260,7 +262,7 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
             retried.signal()
         }
         let time = elapsed {
-            #expect(throws: HelperError.commandFailed("timed out")) { try client.info() }
+            #expect(throws: HelperError.timedOut) { try client.info() }
         }
         // A synchronous callback would add the retry's own 0.5 s timeout.
         #expect(time < 0.9)
@@ -273,7 +275,7 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         let client = harness.makeClient(timeout: 0.3)
         let lost = Counter()
         client.onConnectionLost = { _ in lost.increment() }
-        #expect(throws: HelperError.commandFailed("timed out")) { try client.info() }
+        #expect(throws: HelperError.timedOut) { try client.info() }
         #expect(lost.fired.wait(timeout: .now() + 2) == .success)
         harness.service.hang = false
         #expect(try client.info().version == "1.0")
@@ -318,7 +320,7 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         let harness = Harness()
         harness.service.hang = true
         let client = harness.makeClient(timeout: 0.3)
-        #expect(throws: HelperError.commandFailed("timed out")) { try client.info() }
+        #expect(throws: HelperError.timedOut) { try client.info() }
         harness.service.hang = false
         harness.service.version = "2.0"
         harness.service.flushPending() // the old reply ("1.0") arrives late

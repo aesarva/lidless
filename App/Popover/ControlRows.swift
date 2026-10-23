@@ -70,6 +70,8 @@ struct LidRow: View {
             return (String(localized: "needs a one-time approval in System Settings"), Studio.caution)
         case .needsApproval:
             return (String(localized: "allow Lidless in System Settings → Login Items"), Studio.caution)
+        case .checking:
+            return (String(localized: "Checking…"), Studio.inkDim)
         case .unsigned:
             return (String(localized: "needs a signed build"), Studio.caution)
         case .error(let message):
@@ -122,7 +124,8 @@ struct LidRow: View {
             }
             // Wanted now, applied once the user allows the helper (HelperModel.onBecameInstalled).
             controller.setLidMode(true)
-        case .installed, .error:
+        case .installed, .checking, .error:
+            // Checking: wanted now, applied once the daemon has answered.
             installError = nil
             if suspended != nil {
                 controller.setLidMode(true)

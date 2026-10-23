@@ -30,7 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .requirement(identifier: HelperIDs.helper, teamID: CodeSigningRequirement.ownTeamID())
             .map { XPCHelperClient(requirement: $0) }
         backend = DaemonBackend(registration: SMAppServiceRegistration(), client: client,
-                                appVersion: Bundle.main.shortVersion)
+                                appVersion: Bundle.main.shortVersion, appBuild: Bundle.main.buildVersion)
         // A 0.2.0 closed-lid session force-quit just before this launch: its watchdog sees this
         // process and never resets, and a daemon not yet approved cannot. In the background:
         // sudo may take a moment, and it only ever writes 0.
@@ -100,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         engine.start()
         controller.startOnLaunchIfEnabled()
         statusItem.refresh()
-        // Checks the daemon's version once at launch.
+        // Checks the daemon's version and build once at launch.
         helper.refresh()
         #if DEBUG
         // -DebugStartSession YES -OpenPanelOnLaunch YES: live panel captures for design review.
@@ -171,5 +171,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 extension Bundle {
     var shortVersion: String {
         object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+    }
+
+    var buildVersion: String {
+        object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
     }
 }

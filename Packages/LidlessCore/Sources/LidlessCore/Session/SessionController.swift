@@ -355,7 +355,7 @@ import os
         }
         let status = lid.helperStatus()
         switch status {
-        case .notInstalled, .needsApproval, .error:
+        case .notInstalled, .needsApproval, .checking, .error:
             // Nothing to call yet; `helperDidChange` / the poll retry turn it on later. A
             // helper in error is checked again in the background (which re-registers it).
             mutateSession {
@@ -410,7 +410,7 @@ import os
               s.lidModeSuspendedReason == .helperUnavailable else { return }
         switch lid.helperStatus() {
         case .installed, .error: break
-        case .notInstalled, .needsApproval, .unsigned: return
+        case .notInstalled, .needsApproval, .checking, .unsigned: return
         }
         if let reason = safetyBlock(s) {
             suspendLidMode(reason)

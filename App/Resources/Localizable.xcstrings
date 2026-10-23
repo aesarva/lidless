@@ -124,6 +124,16 @@
         }
       }
     },
+    "Checking…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Проверка…"
+          }
+        }
+      }
+    },
     "Closed-Lid Mode": {
       "localizations": {
         "ru": {
@@ -543,6 +553,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Перезапустить Lidless"
+          }
+        }
+      }
+    },
+    "Running — version %@ (build %@)": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Работает — версия %@ (сборка %@)"
           }
         }
       }

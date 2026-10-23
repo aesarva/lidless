@@ -367,7 +367,7 @@ struct SessionControllerSafetyTests {
         lid.failEnable = true
         startWithLid()
         lid.failEnable = false
-        for status in [HelperStatus.notInstalled, .needsApproval, .unsigned] {
+        for status in [HelperStatus.notInstalled, .needsApproval, .checking, .unsigned] {
             lid.status = status
             c.update(readings: readings())
         }
@@ -525,10 +525,11 @@ struct SessionControllerSafetyTests {
         #expect(helperUnavailablePosts() == 1)
     }
 
-    /// Before the user has allowed the helper, turning lid mode on does not call it: lid mode
-    /// waits silently and turns on once the helper is usable.
+    /// Before the user has allowed the helper, or before the daemon of this registration
+    /// answered, turning lid mode on does not call it: lid mode waits silently and turns on
+    /// once the helper is usable.
     @Test func lidModeWaitsSilentlyForApproval() {
-        for status in [HelperStatus.notInstalled, .needsApproval] {
+        for status in [HelperStatus.notInstalled, .needsApproval, .checking] {
             let lid = FakeLid()
             let notifier = FakeNotifier()
             let c = SessionController(assertions: assertions, lid: lid, notifier: notifier,

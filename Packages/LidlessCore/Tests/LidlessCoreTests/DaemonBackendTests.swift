@@ -9,12 +9,14 @@ private struct RegisterError: LocalizedError, CustomStringConvertible {
 
 private func makeBackend(
     _ status: RegistrationStatus = .enabled, client: FakeHelperClient? = FakeHelperClient(),
-    appVersion: String = "0.3.0", root: URL = URL(fileURLWithPath: "/nonexistent-lidless-root")
+    appVersion: String = "0.3.0", appBuild: String = "1",
+    root: URL = URL(fileURLWithPath: "/nonexistent-lidless-root")
 ) -> (DaemonBackend, FakeRegistration) {
     let registration = FakeRegistration(status: status)
     let backend = DaemonBackend(registration: registration, client: client, appVersion: appVersion,
+                                appBuild: appBuild,
                                 legacy: LegacyHelperCleaner(root: root, runner: FakeCommandRunner()),
-                                verifyDelay: 0, unregisterWait: 0)
+                                verifyDelay: 0, unregisterWait: 0, retryDelay: 0)
     return (backend, registration)
 }
 
@@ -29,8 +31,8 @@ private func makeBackend(
 
         let client = FakeHelperClient()
         let (backend, _) = makeBackend(.enabled, client: client)
-        // No XPC from status(): installed until a refresh says otherwise.
-        #expect(backend.status() == .installed)
+        // No XPC from status(): checking until a refresh hears from the daemon.
+        #expect(backend.status() == .checking)
         #expect(client.infoCalls == 0)
         backend.refreshInfo()
         #expect(client.infoCalls == 1)
@@ -40,7 +42,7 @@ private func makeBackend(
     @Test func infoFailureIsErrorUntilNextRefresh() {
         let client = FakeHelperClient()
         let (backend, registration) = makeBackend(client: client)
-        client.infoError = HelperError.commandFailed("timed out")
+        client.infoError = HelperError.timedOut
         backend.refreshInfo()
         // Re-registered once; the replacement does not answer either.
         #expect(registration.unregisterCalls == 1)
@@ -58,17 +60,121 @@ private func makeBackend(
         #expect(backend.status() == .installed)
     }
 
-    /// launchd removed a job that kept failing while SMAppService still reports it enabled:
-    /// info() only times out until the daemon is registered again.
-    @Test func timedOutInfoReregistersOnce() {
+    /// A daemon that answers with an error (pmset -g failed) is reachable and from this
+    /// build: a helper error, not a reason to re-register.
+    @Test func errorReplyDoesNotReregister() {
         let client = FakeHelperClient()
-        client.infoScript = [.failure(.commandFailed("timed out"))]
+        client.infoError = HelperError.commandFailed("pmset failed")
         let (backend, registration) = makeBackend(client: client)
         backend.refreshInfo()
-        #expect(registration.unregisterCalls == 1)
-        #expect(registration.registerCalls == 1)
+        #expect(backend.status() == .error("pmset failed"))
+        #expect(registration.unregisterCalls == 0)
+        #expect(registration.registerCalls == 0)
+    }
+
+    /// One timeout may be a busy daemon: asked again after `retryDelay` before re-registering.
+    @Test func singleTimeoutRetriesBeforeReregistering() {
+        let client = FakeHelperClient()
+        client.infoScript = [.failure(.timedOut)]
+        let (backend, registration) = makeBackend(client: client)
+        backend.refreshInfo()
         #expect(client.infoCalls == 2)
         #expect(backend.status() == .installed)
+        #expect(registration.calls.isEmpty)
+    }
+
+    /// launchd removed a job that kept failing while SMAppService still reports it enabled:
+    /// info() only times out until the daemon is registered again.
+    @Test func twoTimeoutsReregister() {
+        let client = FakeHelperClient()
+        client.infoScript = [.failure(.timedOut), .failure(.timedOut)]
+        let (backend, registration) = makeBackend(client: client)
+        backend.refreshInfo()
+        #expect(registration.calls == ["startUnregister", "register"])
+        #expect(client.infoCalls == 3)
+        #expect(backend.status() == .installed)
+    }
+
+    /// A new build without a version change (a dev build, a re-release): its plist and
+    /// binary are new, so the daemon is re-registered.
+    @Test func buildMismatchReregisters() {
+        let client = FakeHelperClient()
+        client.infoScript = [.success(HelperInfo(version: "0.3.0", build: "41", sleepDisabled: false, owned: false))]
+        client.stubInfo = HelperInfo(version: "0.3.0", build: "42", sleepDisabled: false, owned: false)
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0", appBuild: "42")
+        backend.refreshInfo()
+        #expect(registration.calls == ["startUnregister", "register"])
+        #expect(backend.status() == .installed)
+    }
+
+    /// `.installed` only once the daemon of the current registration answered with this
+    /// app's version and build: not before the first check, nor between a re-registration
+    /// and the replacement's answer.
+    @Test func statusIsCheckingUntilMatchingInfo() {
+        let client = FakeHelperClient()
+        let (backend, registration) = makeBackend(client: client)
+        #expect(backend.status() == .checking)
+        backend.refreshInfo()
+        #expect(backend.status() == .installed)
+
+        client.infoScript = [.success(HelperInfo(version: "0.3.0", build: "0", sleepDisabled: false, owned: false))]
+        let seen = Statuses()
+        client.onInfo = { seen.append(backend.status()) }
+        backend.refreshInfo()
+        #expect(registration.calls == ["startUnregister", "register"])
+        // The old daemon's check, then the replacement's.
+        #expect(seen.values == [.installed, .checking])
+        #expect(backend.status() == .installed)
+    }
+
+    @Test func checkingAfterInstallUntilChecked() throws {
+        let (backend, _) = makeBackend(.notRegistered)
+        try backend.install()
+        #expect(backend.status() == .checking)
+        backend.refreshInfo()
+        #expect(backend.status() == .installed)
+    }
+
+    @Test func lastInfoAfterSuccessfulInfo() {
+        let client = FakeHelperClient()
+        let info = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: true, owned: true)
+        client.stubInfo = info
+        let (backend, _) = makeBackend(client: client)
+        #expect(backend.lastInfo() == nil)
+        backend.refreshInfo()
+        #expect(backend.lastInfo() == info)
+        // A failed check keeps the last answer: it is for display only.
+        client.infoError = HelperError.commandFailed("pmset failed")
+        backend.refreshInfo()
+        #expect(backend.lastInfo() == info)
+    }
+
+    @Test func lastInfoClearedByUninstall() throws {
+        let (backend, _) = makeBackend()
+        backend.refreshInfo()
+        #expect(backend.lastInfo() != nil)
+        try backend.uninstall()
+        #expect(backend.lastInfo() == nil)
+    }
+
+    @Test func lastInfoClearedByInstall() throws {
+        let (backend, _) = makeBackend()
+        backend.refreshInfo()
+        try backend.install()
+        #expect(backend.lastInfo() == nil)
+    }
+
+    /// No cache: every call asks the daemon; its errors surface like the other commands'.
+    @Test func freshInfoAsksTheDaemonEachTime() throws {
+        let client = FakeHelperClient()
+        let (backend, _) = makeBackend(client: client)
+        backend.refreshInfo()
+        client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: true, owned: true)
+        #expect(try backend.freshInfo() == client.stubInfo)
+        #expect(client.infoCalls == 2)
+        client.infoError = HelperError.timedOut
+        #expect(throws: HelperError.commandFailed("timed out")) { try backend.freshInfo() }
+        #expect(throws: HelperError.self) { try makeBackend(client: nil).0.freshInfo() }
     }
 
     @Test func refreshInfoDoesNothingUnlessEnabled() {
@@ -93,7 +199,7 @@ private func makeBackend(
         try backend.install()
         #expect(registration.registerCalls == 1)
         #expect(registration.openSettingsCalls == 0)
-        #expect(backend.status() == .installed)
+        #expect(backend.status() == .checking)
     }
 
     /// SMAppService.register() throws while the user has not approved the daemon yet.
@@ -359,7 +465,7 @@ private func makeBackend(
         registration.completeUnregister()
         try backend.install()
         #expect(registration.calls == ["startUnregister", "register"])
-        #expect(backend.status() == .installed)
+        #expect(backend.status() == .checking)
     }
 
     /// An explicit register that fails leaves the automatic retry in place.
@@ -514,7 +620,9 @@ private func makeBackend(
         gate.signal()
         refreshed.wait()
         #expect(registration.stubStatus == .enabled)
-        #expect(backend.status() == .installed)
+        // The stale verification does not count as a check of the new registration.
+        #expect(backend.status() == .checking)
+        #expect(backend.lastInfo() == nil)
     }
 
     @Test func unsignedNeverTouchesRegistration() {
@@ -565,6 +673,13 @@ private func thrown(_ body: () throws -> Void) -> HelperError? {
     } catch {
         return error as? HelperError
     }
+}
+
+private final class Statuses: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _values: [HelperStatus] = []
+    var values: [HelperStatus] { lock.withLock { _values } }
+    func append(_ status: HelperStatus) { lock.withLock { _values.append(status) } }
 }
 
 private final class Counter: @unchecked Sendable {

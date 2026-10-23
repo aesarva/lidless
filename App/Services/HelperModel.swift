@@ -12,6 +12,8 @@ import LidlessCore
     private(set) var legacyRemoved = false
     /// Why removing the 0.2.0 helper failed (the daemon retries when it next starts).
     private(set) var legacyError: String?
+    /// The daemon's last answer (version and build on the Helper tab).
+    private(set) var daemonInfo: HelperInfo?
 
     /// Called when the status turns `.installed`.
     var onBecameInstalled: (() -> Void)? {
@@ -26,6 +28,7 @@ import LidlessCore
         self.backend = backend
         coordinator = HelperCoordinator(backend: backend, scheduler: scheduler, lidModeHeld: lidModeHeld)
         status = coordinator.status
+        daemonInfo = backend.lastInfo()
         coordinator.onChange = { [weak self] in self?.sync() }
     }
 
@@ -39,6 +42,8 @@ import LidlessCore
         if status != coordinator.status { status = coordinator.status }
         if legacyRemoved != coordinator.legacyRemoved { legacyRemoved = coordinator.legacyRemoved }
         if legacyError != coordinator.legacyError { legacyError = coordinator.legacyError }
+        let info = backend.lastInfo()
+        if daemonInfo != info { daemonInfo = info }
     }
 
     /// Registers the daemon; macOS opens Login Items when it needs the user's approval.

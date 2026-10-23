@@ -13,7 +13,13 @@ struct HelperTab: View {
                     switch helper.status {
                     case .notInstalled: Text("Not set up")
                     case .needsApproval: Text("Waiting for approval")
-                    case .installed: Text("Running, version \(Bundle.main.shortVersion)")
+                    case .checking: Text("Checking…")
+                    case .installed:
+                        if let info = helper.daemonInfo {
+                            Text("Running — version \(info.version) (build \(info.build))")
+                        } else {
+                            Text("Running, version \(Bundle.main.shortVersion)")
+                        }
                     case .unsigned: Text("Needs a signed build")
                     case .error(let message): Text("Error: \(message)").foregroundStyle(.red)
                     }
@@ -26,7 +32,7 @@ struct HelperTab: View {
                         // HelperModel.onBecameInstalled tells the controller once it is allowed.
                         run { await helper.install() }
                     }
-                    .disabled([HelperStatus.installed, .needsApproval, .unsigned].contains(helper.status))
+                    .disabled([HelperStatus.installed, .checking, .needsApproval, .unsigned].contains(helper.status))
                     Button("Remove") { remove() }
                         .disabled(helper.status == .notInstalled || helper.status == .unsigned)
                     if helper.isWorking { ProgressView().controlSize(.small) }

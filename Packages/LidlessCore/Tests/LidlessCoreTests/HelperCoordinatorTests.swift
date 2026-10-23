@@ -32,6 +32,39 @@ struct HelperCoordinatorTests {
         #expect(backend.refreshInfoCalls == 3)
     }
 
+    /// A daemon checked after launch (or after a re-registration) is a transition too.
+    @Test func checkedDaemonBecomesInstalled() async {
+        let c = make(status: .checking)
+        var fired = 0
+        c.onBecameInstalled = { fired += 1 }
+        backend.statusAfterRefresh = .installed
+        await c.refresh().value
+        #expect(fired == 1)
+        #expect(c.status == .installed)
+    }
+
+    /// The daemon's answer (shown on the Helper tab) may change with the status unchanged.
+    @Test func onChangeAfterRefreshWithUnchangedStatus() async {
+        let c = make(status: .installed)
+        var changes = 0
+        c.onChange = { changes += 1 }
+        await c.refresh().value
+        #expect(c.status == .installed)
+        #expect(changes == 1)
+    }
+
+    /// Checking waits like the approval: a refresh that did not settle it (one that began
+    /// before an install) is followed by another.
+    @Test func pollsWhileChecking() async {
+        let c = make(status: .checking)
+        await c.refresh().value
+        #expect(scheduler.active.count == 1)
+        backend.stubStatus = .installed
+        scheduler.fire()
+        #expect(c.status == .installed)
+        #expect(scheduler.active.isEmpty)
+    }
+
     @Test func installedAtLaunchIsNoTransition() async {
         let c = make(status: .installed)
         var fired = 0
