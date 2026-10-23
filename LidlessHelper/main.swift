@@ -28,7 +28,9 @@ if cleaner.isPresent() {
     }
 }
 
-// launchd sends SIGTERM on unregister, Login Items toggle and shutdown.
+// launchd sends SIGTERM on unregister, Login Items toggle and shutdown. Every planned exit
+// is status 0: the plist's KeepAlive restarts only an unsuccessful one (a crash), whose
+// recoverAtStart then resets an owned disablesleep 1 even when no app connects.
 signal(SIGTERM, SIG_IGN)
 let sigterm = DispatchSource.makeSignalSource(
     signal: SIGTERM, queue: DispatchQueue(label: "io.github.aesarva.Lidless.helper.sigterm"))
