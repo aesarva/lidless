@@ -73,9 +73,23 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
     }
     var removeLegacyCalls: Int { lock.withLock { _removeLegacyCalls } }
     var refreshInfoCalls: Int { lock.withLock { _refreshInfoCalls } }
+    private var _statusAfterRefresh: HelperStatus?
+    /// The status the next `refreshInfo()` finds (e.g. a re-registered daemon answering).
+    var statusAfterRefresh: HelperStatus? {
+        get { lock.withLock { _statusAfterRefresh } }
+        set { lock.withLock { _statusAfterRefresh = newValue } }
+    }
 
     func status() -> HelperStatus { stubStatus }
-    func refreshInfo() { lock.withLock { _refreshInfoCalls += 1 } }
+    func refreshInfo() {
+        lock.withLock {
+            _refreshInfoCalls += 1
+            if let next = _statusAfterRefresh {
+                _status = next
+                _statusAfterRefresh = nil
+            }
+        }
+    }
     func install() throws {}
     func uninstall() throws {}
     func legacyHelperPresent() -> Bool { legacyPresent }

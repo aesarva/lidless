@@ -349,7 +349,11 @@ struct SessionControllerSafetyTests {
         #expect(lid.enableCalls == 1)
     }
 
+    /// A helper in error would only time out, on the main thread: the poll asks for a
+    /// background check instead and calls the helper once it is installed again.
     @Test func pollRetryWaitsForAUsableHelper() {
+        var refreshes = 0
+        c.onHelperRefreshNeeded = { refreshes += 1 }
         lid.failEnable = true
         startWithLid()
         lid.failEnable = false
@@ -357,11 +361,78 @@ struct SessionControllerSafetyTests {
             lid.status = status
             c.update(readings: readings())
         }
-        #expect(lid.enableCalls == 1)
+        #expect(refreshes == 0)
         lid.status = .error("timed out")
+        c.update(readings: readings())
+        #expect(lid.enableCalls == 1)
+        #expect(refreshes == 1)
+        lid.status = .installed
         c.update(readings: readings())
         #expect(lid.enableCalls == 2)
         #expect(c.session?.lidModeActive == true)
+    }
+
+    /// Turning lid mode on with the helper in error does not call it (that would freeze the
+    /// app until the call times out): the wish waits, a background check is asked for, and
+    /// lid mode turns on once the helper is installed again.
+    @Test func lidModeWithHelperErrorWaitsForRefresh() {
+        var refreshes = 0
+        c.onHelperRefreshNeeded = { refreshes += 1 }
+        c.start(.indefinite)
+        lid.status = .error("timed out")
+        c.setLidMode(true)
+        #expect(lid.enableCalls == 0)
+        #expect(refreshes == 1)
+        #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+        #expect(notifier.posted.isEmpty)
+        lid.status = .installed
+        c.helperDidChange()
+        #expect(lid.enableCalls == 1)
+        #expect(c.session?.lidModeActive == true)
+        #expect(c.session?.lidModeSuspendedReason == nil)
+    }
+
+    /// The app's wiring: the switch makes no daemon call, the coordinator's background
+    /// refresh finds the daemon installed again and lid mode is taken once.
+    @Test func lidModeWithHelperErrorAppliesAfterBackgroundRefresh() async {
+        let backend = FakeBackend()
+        backend.stubStatus = .error("timed out")
+        let coordinator = HelperCoordinator(backend: backend, scheduler: ManualPollScheduler(), lidModeHeld: { false })
+        let c = SessionController(assertions: assertions, lid: LidSleepService(backend: backend),
+                                  notifier: notifier, settingsStore: MemorySettingsStore(), clock: clock)
+        var refresh: Task<Void, Never>?
+        c.onHelperRefreshNeeded = { refresh = coordinator.refresh() }
+        coordinator.onBecameInstalled = { c.helperDidChange() }
+        c.start(.indefinite)
+        backend.statusAfterRefresh = .installed
+        c.setLidMode(true)
+        #expect(backend.setCalls.isEmpty)
+        #expect(c.session?.lidModeActive == false)
+        await refresh?.value
+        #expect(backend.refreshInfoCalls == 1)
+        #expect(backend.setCalls == [true])
+        #expect(c.session?.lidModeActive == true)
+    }
+
+    /// The refresh still fails: lid mode keeps waiting (the switch shows the helper error)
+    /// and the daemon is never called.
+    @Test func lidModeWithHelperErrorStaysWaitingWhenRefreshFails() async {
+        let backend = FakeBackend()
+        backend.stubStatus = .error("timed out")
+        let coordinator = HelperCoordinator(backend: backend, scheduler: ManualPollScheduler(), lidModeHeld: { false })
+        let c = SessionController(assertions: assertions, lid: LidSleepService(backend: backend),
+                                  notifier: notifier, settingsStore: MemorySettingsStore(), clock: clock)
+        var refresh: Task<Void, Never>?
+        c.onHelperRefreshNeeded = { refresh = coordinator.refresh() }
+        coordinator.onBecameInstalled = { c.helperDidChange() }
+        c.start(.indefinite)
+        c.setLidMode(true)
+        await refresh?.value
+        #expect(backend.setCalls.isEmpty)
+        #expect(coordinator.status == .error("timed out"))
+        #expect(c.settings.lidModeEnabled)
+        #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
     }
 
     /// Before the user has allowed the helper, turning lid mode on does not call it: lid mode

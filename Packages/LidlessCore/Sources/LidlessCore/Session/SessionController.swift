@@ -28,6 +28,9 @@ import os
     public var settings: LidlessSettings {
         didSet { settingsStore.save(settings) }
     }
+    /// Asks for a background check of a helper in error (the app's `HelperCoordinator.refresh`),
+    /// which calls `helperDidChange` once it is installed again.
+    @ObservationIgnored public var onHelperRefreshNeeded: (() -> Void)?
 
     public var session: Session? {
         if case .active(let s) = state { return s }
@@ -341,20 +344,24 @@ import os
     /// automatic retry after it is judged by the new interval. `quietUntilApproved`: the
     /// user's own enable or a session start, before the helper is set up or allowed, just
     /// waits; losing a hold that way (e.g. the helper switched off in Login Items) is reported.
+    /// A helper in error waits the same way: calling it would only time out, on the main thread.
     @discardableResult
     private func enableLidMode(keepingStart: Bool = false, quietUntilApproved: Bool = false) -> Bool {
         mutateSession {
             if !keepingStart || $0.lidModeEnabledAt == nil { $0.lidModeEnabledAt = clock.now }
         }
-        switch lid.helperStatus() {
-        case .notInstalled, .needsApproval:
-            // Nothing to call yet; `helperDidChange` / the poll retry turn it on later.
+        let status = lid.helperStatus()
+        switch status {
+        case .notInstalled, .needsApproval, .error:
+            // Nothing to call yet; `helperDidChange` / the poll retry turn it on later. A
+            // helper in error is checked again in the background (which re-registers it).
             mutateSession {
                 if !$0.lidModeActive { $0.lidModeSuspendedReason = .helperUnavailable }
             }
+            if case .error = status { onHelperRefreshNeeded?() }
             if !quietUntilApproved { raiseHelperUnavailable() }
             return false
-        case .installed, .unsigned, .error:
+        case .installed, .unsigned:
             break
         }
         do {
@@ -377,12 +384,15 @@ import os
     /// Lid mode the user wants but the helper could not apply: try again, unless the safety
     /// rules would suspend it right away (then it is suspended for that reason instead). A
     /// helper that is not set up cannot answer, so it is not asked until it is
-    /// (`helperDidChange`).
+    /// (`helperDidChange`); one in error is checked again in the background instead.
     private func retryHelperSuspendedLidMode() {
         guard let s = session, settings.lidModeEnabled, !s.lidModeActive,
               s.lidModeSuspendedReason == .helperUnavailable else { return }
         switch lid.helperStatus() {
-        case .installed, .error: break
+        case .installed: break
+        case .error:
+            onHelperRefreshNeeded?()
+            return
         case .notInstalled, .needsApproval, .unsigned: return
         }
         if let reason = safetyBlock(s) {

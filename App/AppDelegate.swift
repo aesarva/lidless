@@ -84,6 +84,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         })
         // Lid mode the user asked for while the helper waited for approval turns on now.
         helper.onBecameInstalled = { [weak controller] in controller?.helperDidChange() }
+        // Lid mode wanted while the helper is in error: checked again in the background, so the
+        // switch never waits for a call that would time out.
+        controller.onHelperRefreshNeeded = { [weak helper] in helper?.refresh() }
         settingsWindow = SettingsWindowController(controller: controller, helper: helper)
         statusItem = StatusItemController(
             controller: controller,
