@@ -142,7 +142,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
             do {
                 try finishReregistration()
             } catch {
-                problem = "\(failure); re-registering failed: \(Self.describe(error))"
+                problem = "\(failure); re-registering failed: \(HelperError.message(for: error))"
                 return .refused
             }
             return .reregistered
@@ -161,10 +161,6 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         return problem
     }
 
-    private static func describe(_ error: Error) -> String {
-        (error as? HelperError)?.message ?? error.localizedDescription
-    }
-
     /// The pending steps of a re-registration, from where the last attempt stopped; on
     /// failure the state stays, so the next attempt resumes. Call under `mutationLock`.
     private func finishReregistration() throws {
@@ -172,22 +168,29 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
             try awaitUnregister()
             lock.withLock { reregistration = .registerPending }
         }
-        try registerAfterUnregister()
+        do {
+            try registerAfterUnregister()
+        } catch {
+            // Waiting for the user's approval: not for retries to settle, install()'s flow does.
+            guard registration.status == .requiresApproval else { throw error }
+        }
         lock.withLock { reregistration = .done }
     }
 
-    /// Returns once launchd no longer has the old daemon. Waits for an `unregister` that is
-    /// still outstanding rather than submitting a second one, which would fail on a job that
-    /// is already gone. Call under `mutationLock`.
+    /// Returns once launchd no longer has the old daemon. An `unregister` that is still
+    /// outstanding is always waited for, whatever the status says (register() before its
+    /// completion fails or races the removal), and never submitted a second time, which would
+    /// fail on a job that is already gone. Only with none outstanding does a status of
+    /// not registered stand for confirmation. Call under `mutationLock`.
     private func awaitUnregister() throws {
         let gone = { (status: RegistrationStatus) in status == .notRegistered || status == .notFound }
-        if gone(registration.status) {
-            lock.withLock { outstandingUnregister = nil }
-            return
+        var pending = lock.withLock { outstandingUnregister }
+        if pending == nil {
+            if gone(registration.status) { return }
+            pending = registration.startUnregister()
+            lock.withLock { outstandingUnregister = pending }
         }
-        let pending = lock.withLock { outstandingUnregister } ?? registration.startUnregister()
-        lock.withLock { outstandingUnregister = pending }
-        guard let result = pending.wait(timeout: unregisterWait) else {
+        guard let result = pending?.wait(timeout: unregisterWait) else {
             throw HelperError.installFailed("unregister timed out")
         }
         lock.withLock { outstandingUnregister = nil }
@@ -200,7 +203,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         for attempt in 1... {
             do {
                 return try registration.register()
-            } catch where attempt < Self.verifyAttempts {
+            } catch where attempt < Self.verifyAttempts && registration.status != .requiresApproval {
                 if verifyDelay > 0 { Thread.sleep(forTimeInterval: verifyDelay) }
             }
         }
@@ -226,7 +229,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         } catch {
             // register() throws while the user has not allowed the daemon yet: show them where.
             guard registration.status == .requiresApproval else {
-                throw HelperError.installFailed(Self.describe(error))
+                throw HelperError.installFailed(HelperError.message(for: error))
             }
         }
         if registration.status == .requiresApproval { registration.openSystemSettings() }
@@ -247,7 +250,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         do {
             try registration.unregister()
         } catch {
-            throw HelperError.installFailed(error.localizedDescription)
+            throw HelperError.installFailed(HelperError.message(for: error))
         }
     }
 

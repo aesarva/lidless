@@ -2,8 +2,9 @@ import Foundation
 import Testing
 @testable import LidlessCore
 
-private struct RegisterError: LocalizedError {
+private struct RegisterError: LocalizedError, CustomStringConvertible {
     var errorDescription: String? { "Operation not permitted" }
+    var description: String { "Operation not permitted" }
 }
 
 private func makeBackend(
@@ -273,16 +274,58 @@ private func makeBackend(
         #expect(backend.status() == .installed)
     }
 
-    /// Nothing reported, but launchd no longer has the job: the unregister counts as done.
-    @Test func timeoutThenStatusNotRegisteredCountsAsConfirmed() {
+    /// The status flipping does not stand for the completion: register() waits for it.
+    @Test func statusNotRegisteredWithUnregisterOutstandingDoesNotRegister() throws {
         let (backend, registration, client) = mismatched()
         registration.unregisterHangs = true
         backend.refreshInfo()
+        registration.stubStatus = .notRegistered
+        backend.refreshInfo()
+        #expect(throws: HelperError.self) { try backend.install() }
+        #expect(registration.calls == ["startUnregister"])
+
+        registration.completeUnregister(statusFollows: false)
+        client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
+        backend.refreshInfo()
+        #expect(registration.calls == ["startUnregister", "register"])
+        #expect(backend.status() == .installed)
+    }
+
+    /// The completion arrives while the status still reads enabled: that is confirmation enough.
+    @Test func successWhileStillEnabledRegisters() {
+        let (backend, registration, client) = mismatched()
+        registration.unregisterHangs = true
+        backend.refreshInfo()
+        registration.completeUnregister(statusFollows: false)
+        #expect(registration.stubStatus == .enabled)
+        client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
+        backend.refreshInfo()
+        #expect(registration.calls == ["startUnregister", "register"])
+    }
+
+    /// Nothing outstanding (the earlier unregister failed) and launchd no longer has the job:
+    /// no new unregister, straight to register().
+    @Test func gonePendingRetryWithNothingOutstandingRegisters() {
+        let (backend, registration, client) = mismatched()
+        registration.unregisterHangs = true
+        backend.refreshInfo()
+        registration.completeUnregister(error: RegisterError())
         registration.stubStatus = .notRegistered
         client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
         backend.refreshInfo()
         #expect(registration.calls == ["startUnregister", "register"])
         #expect(backend.status() == .installed)
+    }
+
+    /// A register() that needs the user's approval ends the re-registration: no retries.
+    @Test func reregisterNeedingApprovalIsNotRetried() {
+        let (backend, registration, _) = mismatched()
+        registration.registerError = RegisterError()
+        registration.onRegister = { [registration] in registration.stubStatus = .requiresApproval }
+        backend.refreshInfo()
+        backend.refreshInfo()
+        #expect(registration.registerCalls == 1)
+        #expect(backend.status() == .needsApproval)
     }
 
     /// A failed unregister with the daemon still registered is submitted again.

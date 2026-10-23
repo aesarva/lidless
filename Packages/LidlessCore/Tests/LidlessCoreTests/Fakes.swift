@@ -150,16 +150,15 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
         get { lock.withLock { _statusAfterRegister } }
         set { lock.withLock { _statusAfterRegister = newValue } }
     }
-    /// The unconfirmed `unregister` handler never fires: `unregisterAndWait` times out and
-    /// the daemon stays registered, until this is cleared.
+    /// `startUnregister` holds its completion until `completeUnregister()`.
     var unregisterHangs: Bool {
         get { lock.withLock { _unregisterHangs } }
         set { lock.withLock { _unregisterHangs = newValue } }
     }
-    /// "register", "unregister" and "unregisterAndWait", in call order.
+    /// "register", "unregister" and "startUnregister", in call order.
     var calls: [String] { lock.withLock { _calls } }
     var registerCalls: Int { lock.withLock { _registerCalls } }
-    /// Both `unregister()` and `unregisterAndWait(timeout:)` that took effect.
+    /// Both `unregister()` and `startUnregister()`.
     var unregisterCalls: Int { lock.withLock { _unregisterCalls } }
     var openSettingsCalls: Int { lock.withLock { _openSettingsCalls } }
 
@@ -194,17 +193,18 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
         return pending
     }
 
-    /// Launchd's late completion of the hung `startUnregister`: the job is gone from now on.
-    func completeUnregister(error: Error? = nil) {
+    /// Launchd's completion of the hung `startUnregister`. The status flips with it unless
+    /// `statusFollows` is false (it can change before or after the handler runs).
+    func completeUnregister(error: Error? = nil, statusFollows: Bool = true) {
         guard let pending = lock.withLock({ () -> PendingUnregister? in
             defer { _outstanding = nil }
             return _outstanding
         }) else { return }
-        finish(pending, error: error)
+        finish(pending, error: error, flipStatus: statusFollows)
     }
 
-    private func finish(_ pending: PendingUnregister, error: Error? = nil) {
-        if error == nil { lock.withLock { _status = .notRegistered } }
+    private func finish(_ pending: PendingUnregister, error: Error? = nil, flipStatus: Bool = true) {
+        if error == nil && flipStatus { lock.withLock { _status = .notRegistered } }
         pending.complete(error)
     }
 
