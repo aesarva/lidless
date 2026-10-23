@@ -179,7 +179,7 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
     }
 
     /// A daemon from another build cannot decode the call and drops the connection: that
-    /// is `.rejected`, which tells the backend to re-register, unlike a timeout.
+    /// is `.rejected`, which the backend logs as a dropped connection.
     @Test func olderDaemonInterfaceIsRejected() {
         let harness = Harness(serving: .old)
         let client = harness.makeClient()

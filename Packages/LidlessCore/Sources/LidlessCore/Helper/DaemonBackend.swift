@@ -18,7 +18,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     private let lock = NSLock()
     /// What the last `refreshInfo()` found wrong with an enabled daemon; nil until one does.
     private var infoError: String?
-    /// The once-per-launch re-registration after a version mismatch has been used.
+    /// The once-per-launch re-registration of a daemon that failed a check has been used.
     private var reregistered = false
     /// The user removed the helper: no automatic re-registration until the next `install()`.
     private var userRemoved = false
@@ -58,12 +58,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     public func refreshInfo() {
         let startedIn = lock.withLock { registrationGeneration }
         guard let client, registration.status == .enabled else { return }
-        let problem: String?
-        switch check(client) {
-        case .ok: problem = nil
-        case .failed(let message): problem = message
-        case .mismatch(let message): problem = reregister(client, because: message)
-        }
+        let problem = check(client).flatMap { reregister(client, because: $0) }
         lock.withLock {
             // The user installed or removed the helper meanwhile: this is about the old one.
             guard registrationGeneration == startedIn else { return }
@@ -72,33 +67,28 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         }
     }
 
-    private enum Check {
-        case ok
-        case mismatch(String)
-        case failed(String)
-    }
-
-    private func check(_ client: HelperClient) -> Check {
+    /// What is wrong with the enabled daemon, or nil when it answers with this app's version.
+    private func check(_ client: HelperClient) -> String? {
         do {
             let info = try client.info()
-            if info.version == appVersion { return .ok }
-            return .mismatch("helper version \(info.version) does not match Lidless \(appVersion)")
+            if info.version == appVersion { return nil }
+            return "helper version \(info.version) does not match Lidless \(appVersion)"
         } catch HelperError.rejected(let message) {
-            // An enabled daemon that drops the connection unanswered is most likely one from
-            // another build whose interface differs: re-registering replaces it.
-            return .mismatch("helper dropped the connection: \(message)")
+            // Most likely a daemon from another build whose interface differs.
+            return "helper dropped the connection: \(message)"
         } catch {
-            return .failed(HelperError.message(for: error))
+            return HelperError.message(for: error)
         }
     }
 
-    /// A daemon left over from another app version (an in-place update) or one that drops the
-    /// connection unanswered: re-register once per launch so launchd starts the bundled one,
-    /// then check the replacement. Unregistering
-    /// sends the old daemon SIGTERM, which interrupts the client's connection; the client
-    /// drops it and the next call opens a new one, so no explicit reconnect is needed.
-    /// Returns the problem left, if any.
-    private func reregister(_ client: HelperClient, because mismatch: String) -> String? {
+    /// An enabled daemon that fails a check: one left over from another app version (an
+    /// in-place update), one that drops the connection unanswered, or a job launchd removed
+    /// after it kept failing while SMAppService still reports it enabled (info() only times
+    /// out). Re-register once per launch so launchd starts the bundled one, then check the
+    /// replacement. Unregistering sends the old daemon SIGTERM, which interrupts the client's
+    /// connection; the client drops it and the next call opens a new one, so no explicit
+    /// reconnect is needed. Returns the problem left, if any.
+    private func reregister(_ client: HelperClient, because failure: String) -> String? {
         // nil: re-registered; otherwise why not.
         let refused: String? = mutationLock.withLock {
             let allowed = lock.withLock { () -> Bool in
@@ -107,24 +97,22 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
                 return true
             }
             // The user's uninstall may have run between info() and here.
-            guard allowed, registration.status == .enabled else { return mismatch }
-            log.notice("\(mismatch, privacy: .public): re-registering")
+            guard allowed, registration.status == .enabled else { return failure }
+            log.notice("\(failure, privacy: .public): re-registering")
             do {
                 try registration.unregister()
                 try registerAfterUnregister()
                 return nil
             } catch {
-                return "\(mismatch); re-registering failed: \(error.localizedDescription)"
+                return "\(failure); re-registering failed: \(error.localizedDescription)"
             }
         }
         if let refused { return refused }
-        var problem = mismatch
+        var problem = failure
         for _ in 0..<Self.verifyAttempts {
             if verifyDelay > 0 { Thread.sleep(forTimeInterval: verifyDelay) }
-            switch check(client) {
-            case .ok: return nil
-            case .mismatch(let message), .failed(let message): problem = "after re-registering: \(message)"
-            }
+            guard let message = check(client) else { return nil }
+            problem = "after re-registering: \(message)"
         }
         return problem
     }

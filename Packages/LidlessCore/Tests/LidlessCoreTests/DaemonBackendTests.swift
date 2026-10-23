@@ -38,12 +38,35 @@ private func makeBackend(
 
     @Test func infoFailureIsErrorUntilNextRefresh() {
         let client = FakeHelperClient()
-        let (backend, _) = makeBackend(client: client)
+        let (backend, registration) = makeBackend(client: client)
         client.infoError = HelperError.commandFailed("timed out")
         backend.refreshInfo()
+        // Re-registered once; the replacement does not answer either.
+        #expect(registration.unregisterCalls == 1)
+        #expect(registration.registerCalls == 1)
+        if case .error(let message) = backend.status() {
+            #expect(message.contains("timed out"))
+        } else {
+            Issue.record("unanswered info() is not .error")
+        }
+        backend.refreshInfo()
+        #expect(registration.registerCalls == 1)
         #expect(backend.status() == .error("timed out"))
         client.infoError = nil
         backend.refreshInfo()
+        #expect(backend.status() == .installed)
+    }
+
+    /// launchd removed a job that kept failing while SMAppService still reports it enabled:
+    /// info() only times out until the daemon is registered again.
+    @Test func timedOutInfoReregistersOnce() {
+        let client = FakeHelperClient()
+        client.infoScript = [.failure(.commandFailed("timed out"))]
+        let (backend, registration) = makeBackend(client: client)
+        backend.refreshInfo()
+        #expect(registration.unregisterCalls == 1)
+        #expect(registration.registerCalls == 1)
+        #expect(client.infoCalls == 2)
         #expect(backend.status() == .installed)
     }
 
