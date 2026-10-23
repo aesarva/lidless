@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Persisted "we set disablesleep to 1" flag, so a crashed daemon or a reboot can still undo it.
 public protocol OwnershipStore: Sendable {
@@ -125,6 +126,38 @@ public final class SleepGuard: @unchecked Sendable {
         try cleanUpIfUnheld()
     }
 
+    /// `shutdown()` on the way out (SIGTERM), retried after a failure, and over within `budget`
+    /// whatever happens: each attempt runs on its own thread and is waited for only until the
+    /// budget is spent, because one can wait for the lock behind a slow pmset and then run
+    /// its own (each up to ~19 s with the runner's timeout and kill). No attempt or pause
+    /// starts once it is spent. Returns whether the reset is done; if not, the marker stays
+    /// for `recoverAtStart`, and an abandoned attempt may still finish before the exit.
+    public func shutdown(attempts: Int, pause: TimeInterval, within budget: TimeInterval) -> Bool {
+        let log = Logger(subsystem: HelperIDs.helper, category: "daemon")
+        let deadline = DispatchTime.now() + budget
+        for attempt in 1...attempts {
+            let done = DispatchSemaphore(value: 0)
+            let failure = ShutdownFailure()
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try self.shutdown()
+                } catch {
+                    failure.message = HelperError.message(for: error)
+                }
+                done.signal()
+            }
+            guard done.wait(timeout: deadline) == .success else {
+                log.error("release on SIGTERM still running (\(attempt)/\(attempts)) when the time ran out")
+                return false
+            }
+            guard let message = failure.message else { return true }
+            log.error("release on SIGTERM failed (\(attempt)/\(attempts)): \(message, privacy: .public)")
+            guard attempt < attempts, DispatchTime.now() + pause < deadline else { return false }
+            if pause > 0 { Thread.sleep(forTimeInterval: pause) }
+        }
+        return false
+    }
+
     /// Closes the guard if nothing is held or pending; returns whether it did (then the daemon
     /// may exit without leaving anything behind). Never waits: while another call holds the
     /// lock (it may be inside pmset for seconds) it returns false and the caller tries later.
@@ -171,5 +204,15 @@ public final class SleepGuard: @unchecked Sendable {
             try store.remove()
         }
         marker = .none
+    }
+}
+
+/// One shutdown attempt's error, written on its thread and read after its semaphore.
+private final class ShutdownFailure: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _message: String?
+    var message: String? {
+        get { lock.withLock { _message } }
+        set { lock.withLock { _message = newValue } }
     }
 }

@@ -195,6 +195,56 @@ import Testing
         #expect(guardian.isIdle)
     }
 
+    /// The SIGTERM path: a failed reset is tried again.
+    @Test func boundedShutdownRetriesAFailedReset() throws {
+        let (guardian, setting, store) = make(initial: false)
+        try guardian.acquire(a)
+        setting.failWriteZeroTimes = 1
+        #expect(guardian.shutdown(attempts: 3, pause: 0, within: 5))
+        #expect(setting.writes == [true, false])
+        #expect(!store.exists())
+        #expect(throws: HelperError.commandFailed("shutting down")) { try guardian.acquire(b) }
+    }
+
+    @Test func boundedShutdownGivesUpAfterTheLastAttempt() throws {
+        let (guardian, setting, store) = make(initial: false)
+        try guardian.acquire(a)
+        setting.failWriteZeroTimes = 10
+        #expect(!guardian.shutdown(attempts: 3, pause: 0, within: 5))
+        // The write 1, then three failed 0s.
+        #expect(setting.fileExistedAtAttempt.count == 4)
+        #expect(store.exists())
+    }
+
+    /// A hung pmset (or a wait for the lock behind one) cannot hold the exit past the
+    /// budget, and no new attempt starts once it is spent.
+    @Test func boundedShutdownReturnsWithinBudgetWhileAWriteHangs() throws {
+        let (guardian, setting, store) = make(initial: false)
+        try guardian.acquire(a)
+        let block = setting.blockNextWrite()
+        let started = Date()
+        #expect(!guardian.shutdown(attempts: 3, pause: 0, within: 0.2))
+        let elapsed = Date().timeIntervalSince(started)
+        #expect(elapsed >= 0.2 && elapsed < 1)
+        #expect(block.started.wait(timeout: .now()) == .success)
+        // Let the abandoned attempt finish: it was the only one.
+        block.gate.signal()
+        for _ in 0..<100 where store.exists() { Thread.sleep(forTimeInterval: 0.01) }
+        #expect(setting.fileExistedAtAttempt.count == 2)
+        #expect(setting.writes == [true, false])
+    }
+
+    /// No pause is started that would end past the budget.
+    @Test func boundedShutdownSkipsAPauseThatOverrunsTheBudget() throws {
+        let (guardian, setting, _) = make(initial: false)
+        try guardian.acquire(a)
+        setting.failWriteZeroTimes = 10
+        let started = Date()
+        #expect(!guardian.shutdown(attempts: 3, pause: 5, within: 0.5))
+        #expect(Date().timeIntervalSince(started) < 1)
+        #expect(setting.fileExistedAtAttempt.count == 2)
+    }
+
     @Test func shutdownIfIdleClosesOnlyWhenIdle() throws {
         let (guardian, setting, _) = make(initial: false)
         try guardian.acquire(a)

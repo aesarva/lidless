@@ -35,23 +35,12 @@ signal(SIGTERM, SIG_IGN)
 let sigterm = DispatchSource.makeSignalSource(
     signal: SIGTERM, queue: DispatchQueue(label: "io.github.aesarva.Lidless.helper.sigterm"))
 sigterm.setEventHandler {
-    // A failed reset is tried again (shutdown() repeats the write while the 1 is owned). No
-    // new attempt after 5 s, so a hung pmset (15 s timeout) stays within launchd's 20 s exit
-    // timeout; a marker still left is undone by the next start.
-    let attempts = 3
-    let deadline = Date().addingTimeInterval(5)
-    for attempt in 1...attempts {
-        do {
-            // Closes the guard too: an acquire still in flight cannot set 1 before exit.
-            try sleepGuard.shutdown()
-            break
-        } catch {
-            log.error("release on SIGTERM failed (\(attempt)/\(attempts)): \(HelperError.message(for: error), privacy: .public)")
-            guard attempt < attempts, Date() < deadline else { break }
-            Thread.sleep(forTimeInterval: 0.3)
-        }
-    }
-    log.notice("SIGTERM, exiting")
+    // Closes the guard too: an acquire still in flight cannot set 1 before exit. A failed
+    // reset is tried again, 3 attempts 0.3 s apart, all over within 15 s, short of launchd's
+    // 20 s exit timeout even when pmset hangs; a marker still left is undone by the next start.
+    // Status 0 either way: after unregister or Login Items off launchd would not restart it.
+    let reset = sleepGuard.shutdown(attempts: 3, pause: 0.3, within: 15)
+    log.notice("SIGTERM, exiting\(reset ? "" : " with the reset pending", privacy: .public)")
     exit(0)
 }
 sigterm.resume()
