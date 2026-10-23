@@ -3,9 +3,9 @@
 ## 0.3.0 — Unreleased
 
 - The privileged helper is now a daemon registered through `SMAppService`: approve it once in System Settings → General → Login Items & Extensions, with no administrator password and no sudoers rule.
-- Normal sleep returns at once when Lidless quits, crashes or is force-quit; a reboot mid-session is reset at boot; switching the helper off in Login Items restores sleep and shows the attention dot.
+- Normal sleep returns at once when Lidless quits, crashes or is force-quit; a reboot mid-session is reset at boot; if the helper crashes, macOS starts it again and closed-lid mode is re-applied; switching Lidless off in Login Items makes macOS quit it, which restores normal sleep.
 - A `disablesleep` set by someone else is never touched.
-- The 0.2.0 helper (sudoers rule, watchdog script and launchd job) is removed automatically once the new helper is approved.
+- The 0.2.0 helper (sudoers rule, watchdog script and launchd job) is removed automatically once the new helper is approved. A `disablesleep` left on by a cut-short 0.2.0 closed-lid session is reset at launch even before that.
 - Closed-lid mode works only in builds signed with a Developer ID; unsigned builds show "needs a signed build".
 - Settings → Helper: Set Up… and Remove (no password).
 

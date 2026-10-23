@@ -36,7 +36,7 @@ Most keep-awake utilities stop at "don't sleep while the lid is open". Lidless i
 
 - **Works with the lid closed.** Close the lid and the screen goes dark, but the Mac keeps running your build, download, render, AI agent, SSH session or AirPlay stream. With an external display connected, Lidless leaves your screens alone.
 - **Guards itself.** A session stops on low battery, closed-lid mode pauses when the Mac gets hot, and a time limit stops a forgotten laptop from cooking in a bag. If the Mac is critically hot with the lid closed, the session ends.
-- **Never leaves your Mac broken.** Quitting Lidless restores normal sleep. If it crashes or is force-quit, normal sleep returns at once; if the Mac reboots mid-session, it is reset at boot. The only privileged command Lidless can run is `pmset -a disablesleep 0|1`.
+- **Never leaves your Mac broken.** Quitting Lidless restores normal sleep. If it crashes or is force-quit, normal sleep returns at once; if the Mac reboots mid-session, it is reset at boot. The only privileged command Lidless can run is `pmset -a disablesleep 0|1`, besides removing the 0.2.0 helper once.
 - **One press.** The ON AIR sign *is* the button. Press it to go on air, press it again to go off air. The sign counts down a timed session or counts time on air for an indefinite one.
 - **Honest at a glance.** While on air the menu-bar icon is a small lit red lamp; with a timer its light burns down as time runs out. An orange dot means something needs your attention.
 - **Native and private.** SwiftUI + AppKit, a universal binary, no network access, no analytics, no accounts.
@@ -105,21 +105,21 @@ Ordinary sessions use a standard macOS power assertion and need nothing extra. K
 | `Lidless.app/Contents/Library/LaunchDaemons/io.github.aesarva.Lidless.helper.plist` | the launchd job description that `SMAppService` registers |
 | `/Library/Application Support/Lidless/sleep-owned` | state file, written only while the helper has turned `disablesleep` on |
 
-Closed-lid mode is tied to Lidless's live connection to the helper. If Lidless quits, crashes or is force-quit, the helper restores normal sleep at once. If the Mac reboots mid-session, the helper sees `sleep-owned` at boot and resets `disablesleep`. If you switch the helper off in Login Items, normal sleep is restored and the menu-bar icon shows the orange dot. Lidless never touches a `disablesleep` you set yourself.
+Closed-lid mode is tied to Lidless's live connection to the helper. If Lidless quits, crashes or is force-quit, the helper restores normal sleep at once. If the Mac reboots mid-session, the helper sees `sleep-owned` at boot and resets `disablesleep`. If the helper crashes, macOS starts it again and Lidless re-applies closed-lid mode. If you switch Lidless off in Login Items, macOS quits Lidless and normal sleep is restored. Lidless never touches a `disablesleep` you set yourself.
 
 When the lid closes in closed-lid mode, Lidless turns the screen off (`pmset displaysleepnow`, no privileges needed) and keeps the Mac awake; when the lid opens, your display choice applies again.
 
 ### Security model
 
-- **One command.** The helper's only privileged action is `pmset -a disablesleep 0|1`. It takes no paths or arguments from the app beyond that on/off choice.
-- **Signature checks both ways.** The helper accepts connections only from Lidless signed by the same Developer ID team as the helper, and Lidless connects only to a helper signed by that team. A build with no team (ad-hoc) is refused on both sides.
+- **One command.** The helper's only privileged action is `pmset -a disablesleep 0|1`. It takes no paths or arguments from the app beyond that on/off choice. The one exception is the one-time removal of the 0.2.0 helper when the new helper first starts (`launchctl bootout` of its watchdog job and deleting its files).
+- **Signature checks both ways.** The helper accepts connections only from Lidless signed by the same Developer ID team as the helper, and Lidless connects only to a helper signed by that team. A build with no team (ad-hoc) is refused on both sides. macOS also refuses to launch the helper at all if its code signature no longer matches.
 - **Reset on disconnect and at boot.** Normal sleep returns when the connection ends and, after a reboot, at boot.
 - **Run from one location.** Run Lidless from one location (for example `/Applications`): macOS ties the registration to the bundle path.
-- **If the helper breaks or is switched off** (for example, in Login Items) while closed-lid mode is on, normal sleep is restored and Lidless shows the orange dot.
+- **If the helper crashes** while closed-lid mode is on, macOS starts it again and Lidless re-applies closed-lid mode. **If you switch Lidless off** in Login Items, macOS quits Lidless and normal sleep is restored.
 
 ### Upgrading from 0.2.0
 
-Version 0.2.0 installed a sudoers rule, a root watchdog script and a launchd job. When you approve the new helper, it removes all of them (and the old marker file) before accepting any connection. Lidless retries once per launch if any files remain, and Settings → Helper shows "The 0.2.0 helper was removed." or an error line. You do not need to run anything by hand.
+Version 0.2.0 installed a sudoers rule, a root watchdog script and a launchd job. When you approve the new helper, it removes all of them (and the old marker file) before accepting any connection. Lidless retries once per launch if any files remain, and Settings → Helper shows "The 0.2.0 helper was removed." or an error line. If a 0.2.0 closed-lid session was cut short and you have not approved the new helper yet, Lidless resets `disablesleep` at launch through the old rule (`sudo -n pmset -a disablesleep 0`, no password). You do not need to run anything by hand.
 
 ### Uninstall
 
@@ -188,9 +188,9 @@ These checks need a real MacBook and a build signed with a Developer ID. They ar
 1. First closed-lid mode: macOS shows a notification and opens Login Items; after you allow Lidless, closed-lid mode turns on by itself.
 2. Lid closed for 5 minutes, no charger and no external display: the Mac does not sleep and an SSH session stays alive.
 3. Force-quit Lidless in closed-lid mode: `pmset -g` shows `SleepDisabled 0` within a couple of seconds.
-4. `sudo kill -9` the helper daemon mid-session: closed-lid mode is restored and `SleepDisabled 1` comes back.
+4. `sudo kill -9` the helper daemon mid-session: launchd starts it again, closed-lid mode is restored and `SleepDisabled 1` comes back.
 5. Reboot mid-session: after boot `SleepDisabled 0`.
-6. Switch Lidless off in Login Items mid-session: `SleepDisabled 0` and the orange dot.
+6. Switch Lidless off in Login Items mid-session: macOS quits Lidless and `SleepDisabled 0`.
 7. `sudo pmset -a disablesleep 1` by hand, then turn closed-lid mode on and off: it stays 1.
 8. Upgrading from 0.2.0 on the same Mac: the sudoers file and watchdog are gone and the `app.lidless.watchdog` job is unloaded.
 9. Settings → Helper → Remove: the daemon is unregistered and `SleepDisabled 0`.
