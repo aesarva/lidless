@@ -373,9 +373,10 @@ struct SessionControllerSafetyTests {
     }
 
     /// Turning lid mode on with the helper in error does not call it (that would freeze the
-    /// app until the call times out): the wish waits, a background check is asked for, and
-    /// lid mode turns on once the helper is installed again.
-    @Test func lidModeWithHelperErrorWaitsForRefresh() {
+    /// app until the call times out). Unlike the approval wait it warns at once: the wish
+    /// waits, a background check is asked for, and lid mode turns on once the helper is
+    /// installed again.
+    @Test func lidModeWithHelperErrorWarnsAndWaitsForRefresh() {
         var refreshes = 0
         c.onHelperRefreshNeeded = { refreshes += 1 }
         c.start(.indefinite)
@@ -385,12 +386,47 @@ struct SessionControllerSafetyTests {
         #expect(refreshes == 1)
         #expect(c.session?.lidModeActive == false)
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
-        #expect(notifier.posted.isEmpty)
+        #expect(c.attention == .helperUnavailable)
+        #expect(helperUnavailablePosts() == 1)
         lid.status = .installed
         c.helperDidChange()
         #expect(lid.enableCalls == 1)
         #expect(c.session?.lidModeActive == true)
         #expect(c.session?.lidModeSuspendedReason == nil)
+        // As after any helper failure, the dot goes when the user opens the panel.
+        c.clearAttention()
+        #expect(c.attention == nil)
+        #expect(helperUnavailablePosts() == 1)
+    }
+
+    /// The helper stays in error after the user has seen the warning: the next readings
+    /// raise it again, as a failed retry always did, still without calling the helper.
+    @Test func pollWithHelperErrorWarnsAgainAfterClear() {
+        var refreshes = 0
+        c.onHelperRefreshNeeded = { refreshes += 1 }
+        lid.status = .error("timed out")
+        startWithLid()
+        c.clearAttention()
+        #expect(c.attention == nil)
+        c.update(readings: readings())
+        #expect(lid.enableCalls == 0)
+        #expect(refreshes == 2)
+        #expect(c.attention == .helperUnavailable)
+        #expect(helperUnavailablePosts() == 2)
+    }
+
+    /// A session started (e.g. from the right-click menu) with lid mode wanted and the
+    /// helper in error warns at once instead of lighting up as if lid mode were on.
+    @Test func startWithLidModeAndHelperErrorWarns() {
+        var refreshes = 0
+        c.onHelperRefreshNeeded = { refreshes += 1 }
+        lid.status = .error("timed out")
+        startWithLid()
+        #expect(lid.enableCalls == 0)
+        #expect(refreshes == 1)
+        #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+        #expect(c.attention == .helperUnavailable)
+        #expect(helperUnavailablePosts() == 1)
     }
 
     /// The app's wiring: the switch makes no daemon call, the coordinator's background
@@ -415,8 +451,8 @@ struct SessionControllerSafetyTests {
         #expect(c.session?.lidModeActive == true)
     }
 
-    /// The refresh still fails: lid mode keeps waiting (the switch shows the helper error)
-    /// and the daemon is never called.
+    /// The refresh still fails: lid mode keeps waiting with the warning up and the daemon is
+    /// never called.
     @Test func lidModeWithHelperErrorStaysWaitingWhenRefreshFails() async {
         let backend = FakeBackend()
         backend.stubStatus = .error("timed out")
@@ -433,6 +469,8 @@ struct SessionControllerSafetyTests {
         #expect(coordinator.status == .error("timed out"))
         #expect(c.settings.lidModeEnabled)
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+        #expect(c.attention == .helperUnavailable)
+        #expect(helperUnavailablePosts() == 1)
     }
 
     /// Before the user has allowed the helper, turning lid mode on does not call it: lid mode
