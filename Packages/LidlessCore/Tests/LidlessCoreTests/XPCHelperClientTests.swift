@@ -53,9 +53,9 @@ private final class TestService: NSObject, HelperProtocol, @unchecked Sendable {
         answer { reply(error) }
     }
 
-    func info(reply: @escaping @Sendable (String, Bool, String?) -> Void) {
+    func info(reply: @escaping @Sendable (String, String, Bool, Bool, String?) -> Void) {
         let (version, error) = (self.version, self.infoError)
-        answer { reply(version, true, error) }
+        answer { reply(version, "7", true, false, error) }
     }
 
     func removeLegacyHelper(reply: @escaping @Sendable ([String], String?) -> Void) {
@@ -171,10 +171,17 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
 }
 
 @Suite struct XPCHelperClientTests {
+    @Test func infoDecodesBuildAndOwned() throws {
+        let client = Harness().makeClient()
+        let info = try client.info()
+        #expect(info.build == "7")
+        #expect(!info.owned)
+    }
+
     @Test func replyComesBackAsHelperInfo() throws {
         let harness = Harness()
         let client = harness.makeClient()
-        #expect(try client.info() == HelperInfo(version: "1.0", sleepDisabled: true))
+        #expect(try client.info() == HelperInfo(version: "1.0", build: "7", sleepDisabled: true, owned: false))
         #expect(try client.removeLegacyHelper() == ["/a"])
     }
 
@@ -315,7 +322,7 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         harness.service.hang = false
         harness.service.version = "2.0"
         harness.service.flushPending() // the old reply ("1.0") arrives late
-        #expect(try client.info() == HelperInfo(version: "2.0", sleepDisabled: true))
+        #expect(try client.info() == HelperInfo(version: "2.0", build: "7", sleepDisabled: true, owned: false))
         #expect(try client.info().version == "2.0")
     }
 }

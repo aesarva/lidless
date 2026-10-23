@@ -125,7 +125,7 @@ private func makeBackend(
         try backend.setSleepDisabled(false)
         #expect(client.setCalls == [true, false])
 
-        client.stubInfo = HelperInfo(version: "0.3.0", sleepDisabled: true)
+        client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: true, owned: false)
         #expect(try backend.isSleepDisabled() == true)
     }
 
@@ -142,7 +142,7 @@ private func makeBackend(
 
     @Test func versionMismatchReregistersOnce() {
         let client = FakeHelperClient()
-        client.stubInfo = HelperInfo(version: "0.2.9", sleepDisabled: false)
+        client.stubInfo = HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)
         let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
         backend.refreshInfo()
         #expect(registration.unregisterCalls == 1)
@@ -155,7 +155,7 @@ private func makeBackend(
         #expect(registration.registerCalls == 1)
         if case .error = backend.status() {} else { Issue.record("mismatch after re-registering is not .error") }
 
-        client.stubInfo = HelperInfo(version: "0.3.0", sleepDisabled: false)
+        client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
         backend.refreshInfo()
         #expect(backend.status() == .installed)
     }
@@ -182,7 +182,7 @@ private func makeBackend(
     /// the old job: retried after a pause.
     @Test func reregistrationRetriesRegisterWhileLaunchdCatchesUp() {
         let client = FakeHelperClient()
-        client.infoScript = [.success(HelperInfo(version: "0.2.9", sleepDisabled: false))]
+        client.infoScript = [.success(HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false))]
         let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
         registration.registerError = RegisterError()
         registration.onRegister = { [registration] in
@@ -196,7 +196,7 @@ private func makeBackend(
 
     @Test func reregistrationGivesUpAfterThreeRegisterFailures() {
         let client = FakeHelperClient()
-        client.stubInfo = HelperInfo(version: "0.2.9", sleepDisabled: false)
+        client.stubInfo = HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)
         let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
         registration.registerError = RegisterError()
         backend.refreshInfo()
@@ -207,7 +207,7 @@ private func makeBackend(
 
     @Test func reregistrationVerifiesTheReplacement() {
         let client = FakeHelperClient()
-        let old = HelperInfo(version: "0.2.9", sleepDisabled: false)
+        let old = HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)
         client.infoScript = [.success(old), .failure(.commandFailed("connection interrupted"))]
         let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
         backend.refreshInfo()
@@ -218,7 +218,7 @@ private func makeBackend(
 
     @Test func replacementThatNeverAnswersIsError() {
         let client = FakeHelperClient()
-        client.infoScript = [.success(HelperInfo(version: "0.2.9", sleepDisabled: false))]
+        client.infoScript = [.success(HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false))]
         client.infoError = HelperError.commandFailed("no reply")
         let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
         backend.refreshInfo()
@@ -235,7 +235,7 @@ private func makeBackend(
     /// thread: the uninstall waits for it and wins.
     @Test func uninstallDuringReregistrationWins() {
         let client = FakeHelperClient()
-        client.stubInfo = HelperInfo(version: "0.2.9", sleepDisabled: false)
+        client.stubInfo = HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)
         let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
         let started = DispatchSemaphore(value: 0)
         let gate = DispatchSemaphore(value: 0)
@@ -269,7 +269,7 @@ private func makeBackend(
     /// if launchd still reports the daemon as enabled.
     @Test func uninstallDisablesAutomaticReregistration() {
         let client = FakeHelperClient()
-        client.stubInfo = HelperInfo(version: "0.2.9", sleepDisabled: false)
+        client.stubInfo = HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)
         let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
         client.onInfo = {
             client.onInfo = nil
@@ -291,7 +291,7 @@ private func makeBackend(
     /// registration.
     @Test func staleVerificationDoesNotOverwriteAfterReinstall() throws {
         let client = FakeHelperClient()
-        client.stubInfo = HelperInfo(version: "0.2.9", sleepDisabled: false)
+        client.stubInfo = HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)
         let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
         let calls = Counter()
         let started = DispatchSemaphore(value: 0)

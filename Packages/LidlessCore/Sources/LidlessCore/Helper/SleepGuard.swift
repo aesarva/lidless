@@ -68,6 +68,12 @@ public final class SleepGuard: @unchecked Sendable {
         return holders.isEmpty && marker == .none
     }
 
+    /// The marker means we may have set 1 and not yet confirmed the 0.
+    public var ownsSetting: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return marker == .owned
+    }
+
     /// A cleanup failed and nobody holds: `retryPendingReset()` has work to do.
     public var hasPendingReset: Bool {
         lock.lock(); defer { lock.unlock() }
@@ -182,7 +188,8 @@ public final class SleepGuard: @unchecked Sendable {
     public func recoverAtStart() throws {
         lock.lock(); defer { lock.unlock() }
         guard store.exists() else { return }
-        marker = .owned
+        // A 0 already in place needs no second write: only the marker is left to remove.
+        marker = (try? setting.isDisabled()) == false ? .stale : .owned
         try cleanUpIfUnheld()
     }
 
@@ -199,6 +206,8 @@ public final class SleepGuard: @unchecked Sendable {
         case .none: return
         case .owned:
             try setting.setDisabled(false)
+            // The 0 is confirmed: a failing remove below must not write it again.
+            marker = .stale
             try store.remove()
         case .stale:
             try store.remove()

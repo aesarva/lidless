@@ -173,7 +173,7 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
 
 final class FakeHelperClient: HelperClient, @unchecked Sendable {
     private let lock = NSLock()
-    private var _info = HelperInfo(version: "0.3.0", sleepDisabled: false)
+    private var _info = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
     private var _infoError: Error?
     private var _setError: Error?
     private var _setCalls: [Bool] = []

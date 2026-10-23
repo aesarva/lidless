@@ -452,6 +452,36 @@ import Testing
         #expect(!store.exists())
     }
 
+    @Test func recoverAtStartWithZeroOnlyRemovesMarker() throws {
+        let (guardian, setting, store) = make(initial: false, file: true)
+        try guardian.recoverAtStart()
+        #expect(setting.writes.isEmpty)
+        #expect(!store.exists())
+    }
+
+    @Test func confirmedResetThenMarkerRemoveFailureDoesNotWriteAgain() throws {
+        let (guardian, setting, store) = make(initial: false)
+        try guardian.acquire(a)
+        store.failRemove = true
+        #expect(throws: FakeSleepSettingError.self) { try guardian.release(a) }
+        #expect(setting.writes == [true, false])
+        #expect(!guardian.ownsSetting)
+        store.failRemove = false
+        try guardian.retryPendingReset()
+        #expect(setting.writes == [true, false])
+        #expect(!store.exists())
+        #expect(guardian.isIdle)
+    }
+
+    @Test func ownsSettingFollowsMarker() throws {
+        let (guardian, _, _) = make(initial: false)
+        #expect(!guardian.ownsSetting)
+        try guardian.acquire(a)
+        #expect(guardian.ownsSetting)
+        try guardian.release(a)
+        #expect(!guardian.ownsSetting)
+    }
+
     @Test func recoverAtStartWithoutFileDoesNothing() throws {
         let (guardian, setting, _) = make(initial: true)
         try guardian.recoverAtStart()

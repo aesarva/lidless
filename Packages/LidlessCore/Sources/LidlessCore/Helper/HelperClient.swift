@@ -2,10 +2,15 @@ import Foundation
 
 public struct HelperInfo: Equatable, Sendable {
     public let version: String
+    public let build: String
     public let sleepDisabled: Bool
+    /// The daemon set the 1 itself (its marker is `.owned`), so it may reset it.
+    public let owned: Bool
 
-    public init(version: String, sleepDisabled: Bool) {
+    public init(version: String, build: String, sleepDisabled: Bool, owned: Bool) {
         self.version = version
+        self.build = build
+        self.owned = owned
         self.sleepDisabled = sleepDisabled
     }
 }
@@ -72,8 +77,8 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
 
     public func info() throws -> HelperInfo {
         let (info, error): (HelperInfo, String?) = try call { helper, reply in
-            helper.info { version, sleepDisabled, error in
-                reply((HelperInfo(version: version, sleepDisabled: sleepDisabled), error))
+            helper.info { version, build, sleepDisabled, owned, error in
+                reply((HelperInfo(version: version, build: build, sleepDisabled: sleepDisabled, owned: owned), error))
             }
         }
         if let error { throw HelperError.commandFailed(error) }
