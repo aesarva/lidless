@@ -31,6 +31,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .map { XPCHelperClient(requirement: $0) }
         backend = DaemonBackend(registration: SMAppServiceRegistration(), client: client,
                                 appVersion: Bundle.main.shortVersion)
+        // A 0.2.0 closed-lid session force-quit just before this launch: its watchdog sees this
+        // process and never resets, and a daemon not yet approved cannot. In the background:
+        // sudo may take a moment, and it only ever writes 0.
+        let helperStatus = backend.status()
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let otherCopyRunning = NSRunningApplication.runningApplications(withBundleIdentifier: HelperIDs.app)
+            .contains { $0.processIdentifier != ownPID }
+        DispatchQueue.global(qos: .utility).async {
+            LegacySleepReset().resetIfNeeded(helperStatus: helperStatus, otherCopyRunning: otherCopyRunning)
+        }
         lid = LidSleepService(backend: backend)
         notifier = UserNotifier()
         let clock = SystemClock()
