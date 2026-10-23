@@ -29,8 +29,10 @@ import os
         didSet { settingsStore.save(settings) }
     }
     /// Asks for a background check of a helper in error (the app's `HelperCoordinator.refresh`),
-    /// which calls `helperDidChange` once it is installed again.
+    /// which calls `helperDidChange` once it is installed again. Called later on the main
+    /// actor, never from inside the call that asked, and once for any requests in one turn.
     @ObservationIgnored public var onHelperRefreshNeeded: (() -> Void)?
+    @ObservationIgnored private var helperRefreshScheduled = false
 
     public var session: Session? {
         if case .active(let s) = state { return s }
@@ -361,7 +363,7 @@ import os
             }
             if case .error = status {
                 raiseHelperUnavailable()
-                onHelperRefreshNeeded?()
+                requestHelperRefresh()
             } else if !quietUntilApproved {
                 raiseHelperUnavailable()
             }
@@ -383,6 +385,19 @@ import os
             }
             raiseHelperUnavailable()
             return false
+        }
+    }
+
+    /// Deferred: a refresh may find the helper installed at once and call `helperDidChange`,
+    /// which must not run inside `enableLidMode` (it would take lid mode there, and the outer
+    /// call would then report a failure over it).
+    private func requestHelperRefresh() {
+        guard !helperRefreshScheduled else { return }
+        helperRefreshScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            helperRefreshScheduled = false
+            onHelperRefreshNeeded?()
         }
     }
 

@@ -29,6 +29,16 @@ struct SessionControllerSafetyTests {
         c.start(.indefinite)
     }
 
+    /// Lets deferred main-actor work (the refresh request) run until `condition` holds.
+    func until(_ condition: () -> Bool) async {
+        var spins = 0
+        while !condition(), spins < 1000 {
+            await Task.yield()
+            spins += 1
+        }
+        #expect(condition())
+    }
+
     @Test func startWithLidModeEnables() {
         startWithLid()
         #expect(lid.enableCalls == 1)
@@ -351,7 +361,7 @@ struct SessionControllerSafetyTests {
 
     /// A helper in error would only time out, on the main thread: the poll asks for a
     /// background check instead and calls the helper once it is installed again.
-    @Test func pollRetryWaitsForAUsableHelper() {
+    @Test func pollRetryWaitsForAUsableHelper() async {
         var refreshes = 0
         c.onHelperRefreshNeeded = { refreshes += 1 }
         lid.failEnable = true
@@ -365,7 +375,7 @@ struct SessionControllerSafetyTests {
         lid.status = .error("timed out")
         c.update(readings: readings())
         #expect(lid.enableCalls == 1)
-        #expect(refreshes == 1)
+        await until { refreshes == 1 }
         lid.status = .installed
         c.update(readings: readings())
         #expect(lid.enableCalls == 2)
@@ -376,14 +386,14 @@ struct SessionControllerSafetyTests {
     /// app until the call times out). Unlike the approval wait it warns at once: the wish
     /// waits, a background check is asked for, and lid mode turns on once the helper is
     /// installed again.
-    @Test func lidModeWithHelperErrorWarnsAndWaitsForRefresh() {
+    @Test func lidModeWithHelperErrorWarnsAndWaitsForRefresh() async {
         var refreshes = 0
         c.onHelperRefreshNeeded = { refreshes += 1 }
         c.start(.indefinite)
         lid.status = .error("timed out")
         c.setLidMode(true)
         #expect(lid.enableCalls == 0)
-        #expect(refreshes == 1)
+        await until { refreshes == 1 }
         #expect(c.session?.lidModeActive == false)
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
         #expect(c.attention == .helperUnavailable)
@@ -401,29 +411,69 @@ struct SessionControllerSafetyTests {
 
     /// The helper stays in error after the user has seen the warning: the next readings
     /// raise it again, as a failed retry always did, still without calling the helper.
-    @Test func pollWithHelperErrorWarnsAgainAfterClear() {
+    @Test func pollWithHelperErrorWarnsAgainAfterClear() async {
         var refreshes = 0
         c.onHelperRefreshNeeded = { refreshes += 1 }
         lid.status = .error("timed out")
         startWithLid()
+        await until { refreshes == 1 }
         c.clearAttention()
         #expect(c.attention == nil)
         c.update(readings: readings())
         #expect(lid.enableCalls == 0)
-        #expect(refreshes == 2)
+        await until { refreshes == 2 }
         #expect(c.attention == .helperUnavailable)
         #expect(helperUnavailablePosts() == 2)
     }
 
+    /// The refresh request runs after `enableLidMode` has finished: a refresh that finds the
+    /// helper installed at once (the coordinator calls `onBecameInstalled` synchronously)
+    /// must not take lid mode from inside the call that just gave up on it.
+    @Test func refreshRequestNeverReentersEnable() async {
+        var requests = 0
+        var enableCallsAtRequest: Int?
+        c.onHelperRefreshNeeded = { [c, lid] in
+            requests += 1
+            enableCallsAtRequest = lid.enableCalls
+            lid.status = .installed
+            c.helperDidChange()
+        }
+        c.start(.indefinite)
+        lid.status = .error("timed out")
+        c.setLidMode(true)
+        // Not yet: the request is deferred, so nothing ran inside setLidMode.
+        #expect(requests == 0)
+        #expect(lid.enableCalls == 0)
+        await until { requests == 1 }
+        #expect(enableCallsAtRequest == 0)
+        #expect(lid.enableCalls == 1)
+        #expect(c.session?.lidModeActive == true)
+        #expect(c.session?.lidModeSuspendedReason == nil)
+    }
+
+    /// Several requests in one turn ask the coordinator once.
+    @Test func refreshRequestsInOneTurnAreCoalesced() async {
+        var requests = 0
+        c.onHelperRefreshNeeded = { requests += 1 }
+        c.start(.indefinite)
+        lid.status = .error("timed out")
+        c.setLidMode(true)
+        c.update(readings: readings())
+        c.update(readings: readings())
+        await until { requests >= 1 }
+        for _ in 0..<10 { await Task.yield() }
+        #expect(requests == 1)
+    }
+
     /// A session started (e.g. from the right-click menu) with lid mode wanted and the
     /// helper in error warns at once instead of lighting up as if lid mode were on.
-    @Test func startWithLidModeAndHelperErrorWarns() {
+    @Test func startWithLidModeAndHelperErrorWarns() async {
         var refreshes = 0
         c.onHelperRefreshNeeded = { refreshes += 1 }
         lid.status = .error("timed out")
         startWithLid()
         #expect(lid.enableCalls == 0)
-        #expect(refreshes == 1)
+        await until { refreshes == 1 }
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
         #expect(c.attention == .helperUnavailable)
         #expect(helperUnavailablePosts() == 1)
@@ -445,6 +495,7 @@ struct SessionControllerSafetyTests {
         c.setLidMode(true)
         #expect(backend.setCalls.isEmpty)
         #expect(c.session?.lidModeActive == false)
+        await until { refresh != nil }
         await refresh?.value
         #expect(backend.refreshInfoCalls == 1)
         #expect(backend.setCalls == [true])
@@ -464,6 +515,7 @@ struct SessionControllerSafetyTests {
         coordinator.onBecameInstalled = { c.helperDidChange() }
         c.start(.indefinite)
         c.setLidMode(true)
+        await until { refresh != nil }
         await refresh?.value
         #expect(backend.setCalls.isEmpty)
         #expect(coordinator.status == .error("timed out"))
