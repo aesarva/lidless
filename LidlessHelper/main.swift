@@ -36,10 +36,11 @@ let sigterm = DispatchSource.makeSignalSource(
     signal: SIGTERM, queue: DispatchQueue(label: "io.github.aesarva.Lidless.helper.sigterm"))
 sigterm.setEventHandler {
     // Closes the guard too: an acquire still in flight cannot set 1 before exit. A failed
-    // reset is tried again, 3 attempts 0.3 s apart, all over within 15 s, short of launchd's
-    // 20 s exit timeout even when pmset hangs; a marker still left is undone by the next start.
+    // reset is tried again, 3 attempts 0.3 s apart, all over within 4 s, short of the 5 s exit
+    // timeout launchd gives SMAppService daemons (`launchctl print`), even when pmset hangs;
+    // a marker still left is undone by the next start.
     // Status 0 either way: after unregister or Login Items off launchd would not restart it.
-    let reset = sleepGuard.shutdown(attempts: 3, pause: 0.3, within: 15)
+    let reset = sleepGuard.shutdown(attempts: 3, pause: 0.3, within: 4)
     log.notice("SIGTERM, exiting\(reset ? "" : " with the reset pending", privacy: .public)")
     exit(0)
 }

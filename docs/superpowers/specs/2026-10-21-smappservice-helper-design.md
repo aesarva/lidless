@@ -59,7 +59,7 @@ plist демона:
 
 - `NSXPCListener(machServiceName:)`; в `listener(_:shouldAcceptNewConnection:)` — `setCodeSigningRequirement` (раздел 6), экспорт объекта, привязанного к соединению; `invalidationHandler` соединения → `SleepGuard.release(holder:)`.
 - При старте — `SleepGuard.recoverAtStart()`.
-- SIGTERM (выключение в «Объектах входа», `unregister`, выключение Mac) → `SleepGuard.shutdown`: до 3 попыток сбросить свою `1` с паузой 0,3 с в пределах 15 с (launchd ждёт 20 с), выход с кодом 0.
+- SIGTERM (выключение в «Объектах входа», `unregister`, выключение Mac) → `SleepGuard.shutdown`: до 3 попыток сбросить свою `1` с паузой 0,3 с в пределах 4 с (launchd ждёт демона SMAppService 5 с, `exit timeout` в `launchctl print`), выход с кодом 0.
 - Простой: нет соединений и ничего не удерживается 10 с → `exit(0)`; launchd запустит снова по требованию.
 
 ### 2.4 Что удаляется
