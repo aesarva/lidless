@@ -330,6 +330,24 @@ Spec §3.3.
 - [ ] **Step 5:** `make build`; Debug-снимки `-SnapshotDir` для всех состояний строки в en и ru — колонка 320pt не расширяется (контроллер смотрит PNG).
 - [ ] **Step 6: Commit** `feat(updates): update row, blue dot, quick menu and settings`.
 
+### Task 8b: окно настроек — стандартное окно настроек macOS
+
+Запрос пользователя, переданный из сессии ochre (решение проверено там): `.superpowers/sdd/2026-10-24-auto-updates/settings-window-request.md` — исполнитель получает этот файл.
+
+**Files:**
+- Modify: `App/Settings/SettingsWindowController.swift`, `App/Settings/SettingsView.swift` (обёртка `TabView` удаляется), при необходимости `App/Settings/{GeneralTab,SafetyTab,HelperTab,AboutTab}.swift`, `App/Debug/SnapshotExporter.swift`
+
+**Interfaces:**
+- Consumes: `SettingsTab` (существующий enum вкладок), `SettingsNavigation` / `show(tab:)` — выбор вкладки сохраняется через `NSTabViewController.selectedTabViewItemIndex`.
+- Produces: `NSTabViewController` с `tabStyle = .toolbar`, окно `toolbarStyle = .preference`, заголовок окна = имя вкладки; высота окна следует содержимому вкладки (`sizingOptions = [.preferredContentSize]`).
+
+- [ ] **Step 1:** у `SettingsTab` — `title` (локализованный, существующие строки) и `symbol` (gearshape, shield, wrench.and.screwdriver, info.circle).
+- [ ] **Step 2:** `SettingsWindowController` строит окно по образцу из файла запроса; `show(tab:)` выбирает вкладку и в уже открытом окне.
+- [ ] **Step 3:** формы — `Form { … }.formStyle(.grouped)` без собственной внешней рамки или фона; ширина 420.
+- [ ] **Step 4:** снимки окна для каждой вкладки (en и ru) через `window.contentView?.superview` → `bitmapImageRepForCachingDisplay` + `cacheDisplay` в отладочном экспортере (`-SnapshotDir`), чтобы контроллер посмотрел PNG.
+- [ ] **Step 5:** `make test`, `make build` → PASS.
+- [ ] **Step 6: Commit** `improve(settings): native macOS preferences window with toolbar tabs`.
+
 ### Task 9: эфир переживает обновление
 
 Spec §4.
