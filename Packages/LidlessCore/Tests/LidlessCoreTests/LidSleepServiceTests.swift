@@ -4,95 +4,74 @@ import Foundation
 
 @MainActor
 struct LidSleepServiceTests {
-    func makeService() -> (LidSleepService, FakeBackend, URL) {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("lidless-test-\(UUID().uuidString)")
-        let marker = dir.appendingPathComponent("sub/lid-mode.marker")
-        let backend = FakeBackend()
-        return (LidSleepService(backend: backend, markerURL: marker), backend, marker)
+    let backend = FakeBackend()
+    let svc: LidSleepService
+
+    init() {
+        svc = LidSleepService(backend: backend)
     }
 
-    @Test func enableWritesMarkerThenDisables() throws {
-        let (svc, backend, marker) = makeService()
+    @Test func enableThenDisable() throws {
         try svc.enable()
-        #expect(FileManager.default.fileExists(atPath: marker.path))
         #expect(backend.setCalls == [true])
         try svc.disable()
-        #expect(!FileManager.default.fileExists(atPath: marker.path))
+        #expect(backend.setCalls == [true, false])
+        try svc.disable()
         #expect(backend.setCalls == [true, false])
     }
 
-    @Test func enableFailureRemovesMarker() {
-        let (svc, backend, marker) = makeService()
-        backend.failNextSet = .commandFailed("x")
-        #expect(throws: HelperError.commandFailed("x")) { try svc.enable() }
-        #expect(!FileManager.default.fileExists(atPath: marker.path))
-    }
-
-    @Test func disableWithoutMarkerIsNoop() throws {
-        let (svc, backend, _) = makeService()
+    @Test func disableWithoutEnableIsNoop() throws {
         try svc.disable()
         #expect(backend.setCalls == [])
     }
 
-    @Test func disableFailureKeepsMarker() throws {
-        let (svc, backend, marker) = makeService()
+    @Test func enableFailureLeavesNothingToDisable() throws {
+        backend.failNextSet = .commandFailed("x")
+        #expect(throws: HelperError.commandFailed("x")) { try svc.enable() }
+        try svc.disable()
+        #expect(backend.setCalls == [true])
+    }
+
+    @Test func disableFailureKeepsEnabled() throws {
         try svc.enable()
         backend.failNextSet = .commandFailed("y")
         #expect(throws: HelperError.commandFailed("y")) { try svc.disable() }
-        #expect(FileManager.default.fileExists(atPath: marker.path))
+        try svc.disable()
+        #expect(backend.setCalls == [true, false, false])
     }
 
-    @Test func recoverResetsWhenMarkerPresent() throws {
-        let (svc, backend, marker) = makeService()
-        try FileManager.default.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("1".utf8).write(to: marker)
-        #expect(svc.recoverIfNeeded())
-        #expect(backend.setCalls == [false])
-        #expect(!FileManager.default.fileExists(atPath: marker.path))
-    }
-
-    @Test func enableFailureKeepsPreexistingMarker() throws {
-        let (svc, backend, marker) = makeService()
+    /// The daemon let go when the connection dropped: nothing is left to turn off.
+    @Test func connectionLostForgetsTheEnable() throws {
         try svc.enable()
-        backend.failNextSet = .commandFailed("off")
-        #expect(throws: HelperError.commandFailed("off")) { try svc.disable() }
-        backend.failNextSet = .commandFailed("on")
-        #expect(throws: HelperError.commandFailed("on")) { try svc.enable() }
-        #expect(FileManager.default.fileExists(atPath: marker.path))
+        #expect(svc.connectionLost(generation: 1))
+        try svc.disable()
+        #expect(backend.setCalls == [true])
     }
 
-    @Test func recoverWithoutMarkerSucceeds() {
-        let (svc, backend, _) = makeService()
+    /// A late report about an older connection says nothing about a hold on a newer one.
+    @Test func staleLossKeepsANewerHold() throws {
+        try svc.enable()
+        try svc.disable()
+        backend.generation = 2
+        try svc.enable()
+        #expect(!svc.connectionLost(generation: 1))
+        try svc.disable()
+        #expect(backend.setCalls == [true, false, true, false])
+    }
+
+    @Test func newerLossEndsAnOlderHold() throws {
+        try svc.enable()
+        #expect(svc.connectionLost(generation: 2))
+        try svc.disable()
+        #expect(backend.setCalls == [true])
+    }
+
+    @Test func lossWithNothingHeldIsIgnored() {
+        #expect(!svc.connectionLost(generation: 1))
+    }
+
+    @Test func recoverIsNoop() {
         #expect(svc.recoverIfNeeded())
         #expect(backend.setCalls == [])
-    }
-
-    @Test func recoverReportsFailureAndKeepsMarker() throws {
-        let (svc, backend, marker) = makeService()
-        try svc.enable()
-        backend.failNextSet = .commandFailed("z")
-        #expect(!svc.recoverIfNeeded())
-        #expect(FileManager.default.fileExists(atPath: marker.path))
-    }
-
-    @Test func markerRemovedDuringDisableIsNotAFailure() throws {
-        let (svc, backend, marker) = makeService()
-        try svc.enable()
-        backend.onSet = { try? FileManager.default.removeItem(at: marker) }
-        try svc.disable()
-        #expect(backend.setCalls == [true, false])
-    }
-
-    /// The watchdog (or an uninstall) may remove the marker while lid mode is on:
-    /// what this process turned on it still turns off.
-    @Test func disableResetsWhatItEnabledEvenWithoutMarker() throws {
-        let (svc, backend, marker) = makeService()
-        try svc.enable()
-        try FileManager.default.removeItem(at: marker)
-        try svc.disable()
-        #expect(backend.setCalls == [true, false])
-        try svc.disable()
-        #expect(backend.setCalls == [true, false])
     }
 }

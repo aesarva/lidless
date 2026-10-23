@@ -59,7 +59,7 @@ final class StatusItemController {
             helper.refresh()
             item.menu = QuickMenu.build(
                 controller: controller,
-                helperInstalled: helper.status == .installed,
+                helperStatus: helper.status,
                 helperBusy: helper.isWorking,
                 onSettings: openSettings
             )

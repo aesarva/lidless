@@ -36,6 +36,9 @@ ditto build/DerivedData/Build/Products/Release/Lidless.app "$APP"
 # то же поведение, что получат пользователи.
 SIGN_FLAGS=(--force --options runtime --sign "$SIGN_IDENTITY")
 if [ "$SIGN_IDENTITY" != "-" ]; then SIGN_FLAGS+=(--timestamp); fi
+# Вложенный демон подписываем отдельно и до приложения (без --deep): со своим
+# идентификатором, который приложение требует от собеседника по XPC.
+codesign "${SIGN_FLAGS[@]}" --identifier io.github.aesarva.Lidless.helper "$APP/Contents/MacOS/LidlessHelper"
 codesign "${SIGN_FLAGS[@]}" "$APP"
-codesign --verify --strict "$APP"
+codesign --verify --strict --deep "$APP"
 echo "$(pwd)/$APP"

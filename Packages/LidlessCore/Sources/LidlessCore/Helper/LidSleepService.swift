@@ -1,71 +1,50 @@
 import Foundation
-import os
 
 @MainActor public protocol LidSleepControlling: AnyObject {
     func helperStatus() -> HelperStatus
     func enable() throws
     func disable() throws
-    /// Resets sleep if the lid-mode marker is present. Returns true when no marker is present
-    /// or the reset succeeded, false when the reset failed (disablesleep may still be 1).
+    /// Undoes a `disablesleep 1` left behind by an earlier run. Returns false when that failed
+    /// (disablesleep may still be 1).
     @discardableResult func recoverIfNeeded() -> Bool
+    /// The daemon connection of `generation` dropped. Returns true when that ended this
+    /// app's hold (then nothing is held any more); false for nothing held or a report about a
+    /// connection older than the one holding now.
+    func connectionLost(generation: UInt64) -> Bool
 }
 
 @MainActor public final class LidSleepService: LidSleepControlling {
-    public static let defaultMarkerURL = URL(fileURLWithPath: SudoersBackend.markerPath)
-
     private let backend: PrivilegedBackend
-    private let markerURL: URL
-    private let log = Logger(subsystem: "io.github.aesarva.Lidless", category: "helper")
-    /// This process turned disablesleep on and has not turned it off yet. The marker is the
-    /// crash-recovery record, but someone else may remove it (the watchdog, an uninstall):
-    /// what we turned on we turn off regardless.
-    private var enabledHere = false
+    /// Set while this process holds disablesleep on: the generation of the daemon connection
+    /// that took the hold (the daemon releases it when that connection closes).
+    private var heldGeneration: UInt64?
 
-    public init(backend: PrivilegedBackend, markerURL: URL = LidSleepService.defaultMarkerURL) {
+    public init(backend: PrivilegedBackend) {
         self.backend = backend
-        self.markerURL = markerURL
     }
 
     public func helperStatus() -> HelperStatus { backend.status() }
 
     public func enable() throws {
-        let fm = FileManager.default
-        // A marker left by an earlier failed disable means disablesleep may still be 1:
-        // it is the only way back to 0, so a failed enable must not remove it.
-        let existed = fm.fileExists(atPath: markerURL.path)
-        try fm.createDirectory(at: markerURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("1".utf8).write(to: markerURL)
-        do {
-            try backend.setSleepDisabled(true)
-            enabledHere = true
-        } catch {
-            if !existed { try? fm.removeItem(at: markerURL) }
-            throw error
-        }
+        heldGeneration = try backend.setSleepDisabled(true)
     }
 
     public func disable() throws {
-        let fm = FileManager.default
-        guard enabledHere || fm.fileExists(atPath: markerURL.path) else { return }
+        guard heldGeneration != nil else { return }
         try backend.setSleepDisabled(false)
-        enabledHere = false
-        // Sleep is back to normal: a marker that is already gone (the watchdog's own reset,
-        // an overlapping recovery) is not a failure.
-        do {
-            try fm.removeItem(at: markerURL)
-        } catch let error as CocoaError where error.code == .fileNoSuchFile {}
+        heldGeneration = nil
     }
 
+    /// Nothing to do here: the daemon undoes a leftover 1 when it starts and when this app's
+    /// connection goes away.
     @discardableResult
-    public func recoverIfNeeded() -> Bool {
-        guard FileManager.default.fileExists(atPath: markerURL.path) else { return true }
-        log.notice("Stale lid-mode marker found; resetting sleep")
-        do {
-            try disable()
-            return true
-        } catch {
-            log.error("Recovery failed: \(String(describing: error), privacy: .public)")
-            return false
-        }
+    public func recoverIfNeeded() -> Bool { true }
+
+    /// Any connection up to the holding one counts: a newer one dropping means the holding
+    /// one was already gone. After that a `disable()` does not call the daemon.
+    public func connectionLost(generation: UInt64) -> Bool {
+        guard let held = heldGeneration, generation >= held else { return false }
+        heldGeneration = nil
+        return true
     }
 }

@@ -39,6 +39,13 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
     private var _status: HelperStatus = .installed
     private var _failNextSet: HelperError?
     private var _setCalls: [Bool] = []
+    private var _generation: UInt64 = 1
+
+    /// The connection generation `setSleepDisabled` reports.
+    var generation: UInt64 {
+        get { lock.withLock { _generation } }
+        set { lock.withLock { _generation = newValue } }
+    }
 
     var stubStatus: HelperStatus {
         get { lock.lock(); defer { lock.unlock() }; return _status }
@@ -49,22 +56,193 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
         set { lock.lock(); defer { lock.unlock() }; _failNextSet = newValue }
     }
     var setCalls: [Bool] { lock.lock(); defer { lock.unlock() }; return _setCalls }
-    /// Runs after each recorded set, outside the lock (e.g. to race the marker).
-    nonisolated(unsafe) var onSet: (() -> Void)?
+
+    private var _legacyPresent = false
+    private var _removeLegacyError: HelperError?
+    private var _removeLegacyCalls = 0
+    private var _refreshInfoCalls = 0
+    /// What `legacyHelperPresent()` answers; a successful `removeLegacyHelper()` clears it.
+    var legacyPresent: Bool {
+        get { lock.withLock { _legacyPresent } }
+        set { lock.withLock { _legacyPresent = newValue } }
+    }
+    /// Thrown by every `removeLegacyHelper()` while set.
+    var removeLegacyError: HelperError? {
+        get { lock.withLock { _removeLegacyError } }
+        set { lock.withLock { _removeLegacyError = newValue } }
+    }
+    var removeLegacyCalls: Int { lock.withLock { _removeLegacyCalls } }
+    var refreshInfoCalls: Int { lock.withLock { _refreshInfoCalls } }
+    private var _statusAfterRefresh: HelperStatus?
+    /// The status the next `refreshInfo()` finds (e.g. a re-registered daemon answering).
+    var statusAfterRefresh: HelperStatus? {
+        get { lock.withLock { _statusAfterRefresh } }
+        set { lock.withLock { _statusAfterRefresh = newValue } }
+    }
 
     func status() -> HelperStatus { stubStatus }
+    func refreshInfo() {
+        lock.withLock {
+            _refreshInfoCalls += 1
+            if let next = _statusAfterRefresh {
+                _status = next
+                _statusAfterRefresh = nil
+            }
+        }
+    }
     func install() throws {}
     func uninstall() throws {}
-    func setSleepDisabled(_ disabled: Bool) throws {
+    func legacyHelperPresent() -> Bool { legacyPresent }
+    func removeLegacyHelper() throws -> [String] {
+        try lock.withLock {
+            _removeLegacyCalls += 1
+            if let error = _removeLegacyError { throw error }
+            _legacyPresent = false
+            return ["/etc/sudoers.d/lidless"]
+        }
+    }
+    func openSystemSettings() {}
+    func setSleepDisabled(_ disabled: Bool) throws -> UInt64 {
         lock.lock()
         _setCalls.append(disabled)
         let failure = _failNextSet
         _failNextSet = nil
+        let generation = _generation
         lock.unlock()
-        onSet?()
         if let failure { throw failure }
+        return generation
     }
     func isSleepDisabled() throws -> Bool { lock.lock(); defer { lock.unlock() }; return _setCalls.last ?? false }
+}
+
+final class FakeRegistration: HelperRegistration, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _status: RegistrationStatus
+    private var _registerCalls = 0
+    private var _unregisterCalls = 0
+    private var _openSettingsCalls = 0
+    private var _registerError: Error?
+    private var _statusAfterRegister: RegistrationStatus?
+    private var _onRegister: (@Sendable () -> Void)?
+
+    init(status: RegistrationStatus = .notRegistered) { _status = status }
+
+    /// Runs at the start of each `register()`, outside the lock (e.g. to pause it).
+    var onRegister: (@Sendable () -> Void)? {
+        get { lock.withLock { _onRegister } }
+        set { lock.withLock { _onRegister = newValue } }
+    }
+
+    var stubStatus: RegistrationStatus {
+        get { lock.withLock { _status } }
+        set { lock.withLock { _status = newValue } }
+    }
+    /// Thrown by every `register()`; the status stays as it was.
+    var registerError: Error? {
+        get { lock.withLock { _registerError } }
+        set { lock.withLock { _registerError = newValue } }
+    }
+    /// The status a successful `register()` leaves (default: `.enabled`).
+    var statusAfterRegister: RegistrationStatus? {
+        get { lock.withLock { _statusAfterRegister } }
+        set { lock.withLock { _statusAfterRegister = newValue } }
+    }
+    var registerCalls: Int { lock.withLock { _registerCalls } }
+    var unregisterCalls: Int { lock.withLock { _unregisterCalls } }
+    var openSettingsCalls: Int { lock.withLock { _openSettingsCalls } }
+
+    var status: RegistrationStatus { stubStatus }
+
+    func register() throws {
+        onRegister?()
+        lock.lock(); defer { lock.unlock() }
+        _registerCalls += 1
+        if let _registerError { throw _registerError }
+        _status = _statusAfterRegister ?? .enabled
+    }
+
+    func unregister() throws {
+        lock.withLock {
+            _unregisterCalls += 1
+            _status = .notRegistered
+        }
+    }
+
+    func openSystemSettings() { lock.withLock { _openSettingsCalls += 1 } }
+}
+
+final class FakeHelperClient: HelperClient, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _info = HelperInfo(version: "0.3.0", sleepDisabled: false)
+    private var _infoError: Error?
+    private var _setError: Error?
+    private var _setCalls: [Bool] = []
+    private var _infoCalls = 0
+    private var _removeLegacyResult: Result<[String], HelperError> = .success([])
+    private var _lostHandler: (@Sendable (UInt64) -> Void)?
+    private var _generation: UInt64 = 1
+    private var _infoScript: [Result<HelperInfo, HelperError>] = []
+    private var _onInfo: (@Sendable () -> Void)?
+
+    /// Answers for the next `info()` calls, in order; then `stubInfo` / `infoError` again.
+    var infoScript: [Result<HelperInfo, HelperError>] {
+        get { lock.withLock { _infoScript } }
+        set { lock.withLock { _infoScript = newValue } }
+    }
+    /// Runs at the start of each `info()`, outside the lock.
+    var onInfo: (@Sendable () -> Void)? {
+        get { lock.withLock { _onInfo } }
+        set { lock.withLock { _onInfo = newValue } }
+    }
+
+    var stubInfo: HelperInfo {
+        get { lock.withLock { _info } }
+        set { lock.withLock { _info = newValue } }
+    }
+    var infoError: Error? {
+        get { lock.withLock { _infoError } }
+        set { lock.withLock { _infoError = newValue } }
+    }
+    var setError: Error? {
+        get { lock.withLock { _setError } }
+        set { lock.withLock { _setError = newValue } }
+    }
+    var removeLegacyResult: Result<[String], HelperError> {
+        get { lock.withLock { _removeLegacyResult } }
+        set { lock.withLock { _removeLegacyResult = newValue } }
+    }
+    var setCalls: [Bool] { lock.withLock { _setCalls } }
+    var infoCalls: Int { lock.withLock { _infoCalls } }
+
+    var onConnectionLost: (@Sendable (UInt64) -> Void)? {
+        get { lock.withLock { _lostHandler } }
+        set { lock.withLock { _lostHandler = newValue } }
+    }
+    var generation: UInt64 {
+        get { lock.withLock { _generation } }
+        set { lock.withLock { _generation = newValue } }
+    }
+
+    func setSleepDisabled(_ disabled: Bool) throws -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        _setCalls.append(disabled)
+        if let _setError { throw _setError }
+        return _generation
+    }
+
+    func info() throws -> HelperInfo {
+        onInfo?()
+        lock.lock(); defer { lock.unlock() }
+        _infoCalls += 1
+        if !_infoScript.isEmpty { return try _infoScript.removeFirst().get() }
+        if let _infoError { throw _infoError }
+        return _info
+    }
+
+    func removeLegacyHelper() throws -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return try _removeLegacyResult.get()
+    }
 }
 
 // MARK: - Session controller fakes
@@ -93,6 +271,28 @@ struct FakeError: Error {}
     func release() { released += 1 }
 }
 
+/// `PollScheduler` driven by hand: `fire()` runs every active poll once.
+@MainActor final class ManualPollScheduler: PollScheduler {
+    final class Handle: PollHandle {
+        let tick: @MainActor () -> Void
+        var cancelled = false
+        init(tick: @escaping @MainActor () -> Void) { self.tick = tick }
+        func cancel() { cancelled = true }
+    }
+    var handles: [Handle] = []
+    var intervals: [TimeInterval] = []
+    var active: [Handle] { handles.filter { !$0.cancelled } }
+
+    func startPolling(every interval: TimeInterval, _ tick: @escaping @MainActor () -> Void) -> PollHandle {
+        let handle = Handle(tick: tick)
+        handles.append(handle)
+        intervals.append(interval)
+        return handle
+    }
+
+    func fire() { for h in active { h.tick() } }
+}
+
 @MainActor final class FakeNotifier: Notifier {
     var posted: [WakeNotification] = []
     var cancelEndingSoonCount = 0
@@ -104,6 +304,9 @@ struct FakeError: Error {}
     var enableCalls = 0
     var disableCalls = 0
     var recoverCalls = 0
+    var lostGenerations: [UInt64] = []
+    /// What `connectionLost(generation:)` answers: whether the loss ended the current hold.
+    var lossAffectsHold = true
     var failEnable = false
     var failDisable = false
     var failRecover = false
@@ -120,6 +323,10 @@ struct FakeError: Error {}
     func recoverIfNeeded() -> Bool {
         recoverCalls += 1
         return !failRecover
+    }
+    func connectionLost(generation: UInt64) -> Bool {
+        lostGenerations.append(generation)
+        return lossAffectsHold
     }
 }
 
@@ -154,4 +361,122 @@ struct FakeError: Error {}
     var sleepCalls = 0
     func hasExternalDisplay() -> Bool { external }
     func sleepDisplayNow() { sleepCalls += 1 }
+}
+
+final class MemoryOwnershipStore: OwnershipStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _exists: Bool
+    init(exists: Bool = false) { _exists = exists }
+
+    func exists() -> Bool { lock.lock(); defer { lock.unlock() }; return _exists }
+    private var _failRemove = false
+    private var _failCreate = false
+    private var _failCreateLeavesFile = false
+    var failRemove: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _failRemove }
+        set { lock.lock(); defer { lock.unlock() }; _failRemove = newValue }
+    }
+    /// With `failCreate`: the file is written before create() throws.
+    var failCreateLeavesFile: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _failCreateLeavesFile }
+        set { lock.lock(); defer { lock.unlock() }; _failCreateLeavesFile = newValue }
+    }
+    var failCreate: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _failCreate }
+        set { lock.lock(); defer { lock.unlock() }; _failCreate = newValue }
+    }
+
+    func create() throws {
+        lock.lock(); defer { lock.unlock() }
+        if _failCreate {
+            if _failCreateLeavesFile { _exists = true }
+            throw FakeSleepSettingError()
+        }
+        _exists = true
+    }
+    func remove() throws {
+        lock.lock(); defer { lock.unlock() }
+        if _failRemove { throw FakeSleepSettingError() }
+        _exists = false
+    }
+}
+
+struct FakeSleepSettingError: Error, Equatable {}
+
+/// Records successful writes and, for each, whether the ownership file existed at that moment.
+final class FakeSleepSetting: SleepSetting, @unchecked Sendable {
+    private let lock = NSLock()
+    private let store: MemoryOwnershipStore
+    private var _value: Bool
+    private var _writes: [Bool] = []
+    private var _fileExistedAtWrite: [Bool] = []
+    private var _fileExistedAtAttempt: [Bool] = []
+    private var _failRead = false
+    private var _failWriteOne = false
+    private var _applyFailedWriteOne = false
+    private var _failWriteZeroTimes = 0
+    private var _block: (started: DispatchSemaphore, gate: DispatchSemaphore)?
+
+    init(initial: Bool, store: MemoryOwnershipStore) { _value = initial; self.store = store }
+
+    /// The next write signals `started`, then waits for `gate` (a slow pmset). The caller
+    /// (SleepGuard) holds its own lock all the while.
+    func blockNextWrite() -> (started: DispatchSemaphore, gate: DispatchSemaphore) {
+        let block = (started: DispatchSemaphore(value: 0), gate: DispatchSemaphore(value: 0))
+        lock.lock(); defer { lock.unlock() }
+        _block = block
+        return block
+    }
+
+    var fileExistedAtAttempt: [Bool] { lock.lock(); defer { lock.unlock() }; return _fileExistedAtAttempt }
+    var value: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _value }
+        set { lock.lock(); defer { lock.unlock() }; _value = newValue }
+    }
+    var writes: [Bool] { lock.lock(); defer { lock.unlock() }; return _writes }
+    var fileExistedAtWrite: [Bool] { lock.lock(); defer { lock.unlock() }; return _fileExistedAtWrite }
+    var failRead: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _failRead }
+        set { lock.lock(); defer { lock.unlock() }; _failRead = newValue }
+    }
+    var failWriteOne: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _failWriteOne }
+        set { lock.lock(); defer { lock.unlock() }; _failWriteOne = newValue }
+    }
+    /// A failing write 1 still takes effect before it throws.
+    var applyFailedWriteOne: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _applyFailedWriteOne }
+        set { lock.lock(); defer { lock.unlock() }; _applyFailedWriteOne = newValue }
+    }
+    var failWriteZeroTimes: Int {
+        get { lock.lock(); defer { lock.unlock() }; return _failWriteZeroTimes }
+        set { lock.lock(); defer { lock.unlock() }; _failWriteZeroTimes = newValue }
+    }
+
+    func isDisabled() throws -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if _failRead { throw FakeSleepSettingError() }
+        return _value
+    }
+
+    func setDisabled(_ disabled: Bool) throws {
+        let block = lock.withLock { () -> (started: DispatchSemaphore, gate: DispatchSemaphore)? in
+            defer { _block = nil }
+            return _block
+        }
+        if let block {
+            block.started.signal()
+            block.gate.wait()
+        }
+        lock.lock(); defer { lock.unlock() }
+        _fileExistedAtAttempt.append(store.exists())
+        if disabled, _failWriteOne {
+            if _applyFailedWriteOne { _value = true }
+            throw FakeSleepSettingError()
+        }
+        if !disabled, _failWriteZeroTimes > 0 { _failWriteZeroTimes -= 1; throw FakeSleepSettingError() }
+        _value = disabled
+        _writes.append(disabled)
+        _fileExistedAtWrite.append(store.exists())
+    }
 }
