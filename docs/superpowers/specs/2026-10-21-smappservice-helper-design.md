@@ -105,7 +105,7 @@ public enum HelperStatus: Equatable, Sendable {
 - `setSleepDisabled(_:)` — синхронный вызов через `synchronousRemoteObjectProxyWithErrorHandler` с таймаутом 5 с (ожидание на семафоре, без прокрутки run loop); таймаут или ошибка → `HelperError.commandFailed`.
 - `isSleepDisabled()` → `info()`.
 - Соединение одно, `NSXPCConnection(machServiceName:options: .privileged)`, ленивое; `interruptionHandler`/`invalidationHandler` сбрасывают его и вызывают `onConnectionLost`.
-- Версия: если `info().version` ≠ версия приложения → `unregister()` + `register()` один раз за запуск; не помогло → `.error`.
+- Версия: если `info().version` ≠ версия приложения или `info()` не удался у включённой регистрации (демон другой сборки рвёт соединение; launchd снял задание) → `unregister()` + `register()` один раз за запуск; не помогло → `.error`.
 - `status()` вызывается на главном потоке: только чтение `SMAppService.status`; ответ демона на `info()` кэшируется при последнем успешном вызове и обновляется в `refresh` фоновой задачей.
 
 ### 4.2 `LidSleepService`

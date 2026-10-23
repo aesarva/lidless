@@ -1,6 +1,6 @@
 # Security
 
-Lidless installs a small privileged helper for closed-lid mode: a sudoers rule that allows only `/usr/bin/pmset -a disablesleep 0|1` for the installing user, and a root launchd watchdog that resets `disablesleep` to 0 when Lidless is not running. The full model, including its current limits before Developer ID signing, is described in the README under [Security model](README.md#security-model).
+Closed-lid mode uses a small privileged helper: a launchd daemon inside the app bundle, registered through `SMAppService` and approved by the user in System Settings → Login Items. It accepts XPC connections only from Lidless signed with the same Developer ID team, can only turn `pmset disablesleep` on and off, and restores normal sleep when Lidless quits, crashes or removes it. On its first start it also removes the sudoers rule and watchdog installed by Lidless 0.2.0. The full model is described in the README under [Security model](README.md#security-model).
 
 ## Reporting a vulnerability
 
