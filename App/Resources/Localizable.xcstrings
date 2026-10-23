@@ -827,6 +827,16 @@
         }
       }
     },
+    "checking…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "проверка…"
+          }
+        }
+      }
+    },
     "closing the lid puts the Mac to sleep": {
       "localizations": {
         "ru": {

@@ -65,6 +65,8 @@ struct HelperCoordinatorTests {
         #expect(scheduler.active.isEmpty)
     }
 
+    /// Only when the status already reads `.installed` at launch: the usual `.checking` at
+    /// launch turns `.installed` once the daemon answers, which fires (`checkedDaemonBecomesInstalled`).
     @Test func installedAtLaunchIsNoTransition() async {
         let c = make(status: .installed)
         var fired = 0

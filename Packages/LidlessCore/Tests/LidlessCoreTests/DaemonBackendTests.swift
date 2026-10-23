@@ -8,7 +8,7 @@ private struct RegisterError: LocalizedError, CustomStringConvertible {
 }
 
 private func makeBackend(
-    _ status: RegistrationStatus = .enabled, client: FakeHelperClient? = FakeHelperClient(),
+    _ status: RegistrationStatus = .enabled, client: HelperClient? = FakeHelperClient(),
     appVersion: String = "0.3.0", appBuild: String = "1",
     root: URL = URL(fileURLWithPath: "/nonexistent-lidless-root")
 ) -> (DaemonBackend, FakeRegistration) {
@@ -164,7 +164,7 @@ private func makeBackend(
         #expect(backend.lastInfo() == nil)
     }
 
-    /// No cache: every call asks the daemon; its errors surface like the other commands'.
+    /// No cache: every call asks the daemon; its errors come through as the client threw them.
     @Test func freshInfoAsksTheDaemonEachTime() throws {
         let client = FakeHelperClient()
         let (backend, _) = makeBackend(client: client)
@@ -173,8 +173,85 @@ private func makeBackend(
         #expect(try backend.freshInfo() == client.stubInfo)
         #expect(client.infoCalls == 2)
         client.infoError = HelperError.timedOut
-        #expect(throws: HelperError.commandFailed("timed out")) { try backend.freshInfo() }
-        #expect(throws: HelperError.self) { try makeBackend(client: nil).0.freshInfo() }
+        #expect(throws: HelperError.timedOut) { try backend.freshInfo() }
+        client.infoError = HelperError.rejected("connection interrupted")
+        #expect(throws: HelperError.rejected("connection interrupted")) { try backend.freshInfo() }
+        client.infoError = HelperError.commandFailed("pmset failed")
+        #expect(throws: HelperError.commandFailed("pmset failed")) { try backend.freshInfo() }
+        #expect(throws: HelperError.commandFailed("closed-lid mode needs a signed build of Lidless")) {
+            try makeBackend(client: nil).0.freshInfo()
+        }
+    }
+
+    /// A matching answer from the old daemon that arrives after the re-registration (another
+    /// refresh asked it before) is not about the replacement: still checking.
+    @Test func olderCheckDoesNotVerifyTheReplacement() {
+        let matching = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
+        let oldAsked = DispatchSemaphore(value: 0), releaseOld = DispatchSemaphore(value: 0)
+        let replacementAsked = DispatchSemaphore(value: 0), releaseReplacement = DispatchSemaphore(value: 0)
+        let client = GatedClient { call in
+            switch call {
+            case 1:
+                oldAsked.signal()
+                releaseOld.wait()
+                return matching
+            case 2: throw HelperError.rejected("connection interrupted")
+            default:
+                replacementAsked.signal()
+                releaseReplacement.wait()
+                return matching
+            }
+        }
+        let (backend, registration) = makeBackend(client: client)
+        let olderDone = DispatchSemaphore(value: 0), reregisteringDone = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            backend.refreshInfo()
+            olderDone.signal()
+        }
+        oldAsked.wait()
+        DispatchQueue.global().async {
+            backend.refreshInfo()
+            reregisteringDone.signal()
+        }
+        replacementAsked.wait()
+        #expect(registration.calls == ["startUnregister", "register"])
+        releaseOld.signal()
+        olderDone.wait()
+        #expect(backend.status() == .checking)
+        releaseReplacement.signal()
+        reregisteringDone.wait()
+        #expect(backend.status() == .installed)
+    }
+
+    /// A check that began before an uninstall + install and fails afterwards (dropped
+    /// connection, another version) is about the old daemon: the new one is not re-registered.
+    @Test func staleFailureAfterReinstallDoesNotReregister() throws {
+        let failures: [Result<HelperInfo, HelperError>] = [
+            .failure(.rejected("connection interrupted")),
+            .success(HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)),
+        ]
+        for failure in failures {
+            let asked = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+            let client = GatedClient { call in
+                guard call == 1 else { return HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false) }
+                asked.signal()
+                release.wait()
+                return try failure.get()
+            }
+            let (backend, registration) = makeBackend(client: client)
+            let refreshed = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async {
+                backend.refreshInfo()
+                refreshed.signal()
+            }
+            asked.wait()
+            try backend.uninstall()
+            try backend.install()
+            release.signal()
+            refreshed.wait()
+            #expect(registration.calls == ["unregister", "register"])
+            #expect(backend.status() == .checking)
+        }
     }
 
     @Test func refreshInfoDoesNothingUnlessEnabled() {
@@ -673,6 +750,27 @@ private func thrown(_ body: () throws -> Void) -> HelperError? {
     } catch {
         return error as? HelperError
     }
+}
+
+/// `HelperClient` whose `info()` answers come from `answer`, called with the call number
+/// (from 1) outside any lock, so a test can hold one call while others go ahead.
+private final class GatedClient: HelperClient, @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+    private let answer: @Sendable (Int) throws -> HelperInfo
+    var onConnectionLost: (@Sendable (UInt64) -> Void)?
+
+    init(_ answer: @escaping @Sendable (Int) throws -> HelperInfo) { self.answer = answer }
+
+    func setSleepDisabled(_ disabled: Bool) throws -> UInt64 { 1 }
+    func info() throws -> HelperInfo {
+        let call = lock.withLock { () -> Int in
+            calls += 1
+            return calls
+        }
+        return try answer(call)
+    }
+    func removeLegacyHelper() throws -> [String] { [] }
 }
 
 private final class Statuses: @unchecked Sendable {

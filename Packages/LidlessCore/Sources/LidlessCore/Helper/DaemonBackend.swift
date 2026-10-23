@@ -40,7 +40,8 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     private var outstandingUnregister: PendingUnregister?
     /// The user removed the helper: no automatic re-registration until the next `install()`.
     private var userRemoved = false
-    /// Bumped by install() and uninstall(): a refresh that began before one does not report.
+    /// Bumped by install(), uninstall() and each re-registration attempt: a check or refresh
+    /// that began before one is about a daemon that is gone, so it does not report.
     private var registrationGeneration: UInt64 = 0
     /// Held across every registration change (install, uninstall, unregister + register), so a
     /// background re-registration can never undo the user's uninstall.
@@ -85,29 +86,35 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         lock.withLock { answer }
     }
 
+    /// The client's errors as they are (`.timedOut`, `.rejected`, `.commandFailed`).
     public func freshInfo() throws -> HelperInfo {
-        try withClient { try $0.info() }
+        guard let client else { throw HelperError.commandFailed(Self.unsignedMessage) }
+        return try client.info()
     }
 
     public func refreshInfo() {
-        let startedIn = lock.withLock { registrationGeneration }
+        // Advanced by this refresh's own re-registration: the result is about the replacement.
+        var generation = lock.withLock { registrationGeneration }
         guard let client else { return }
         let problem: String?
         if lock.withLock({ reregistrationPending }) {
             // Unregistered (or never confirmed) by a re-registration that did not finish.
-            problem = reregister(client, because: lock.withLock { reregistrationReason }, startedIn: startedIn,
+            problem = reregister(client, because: lock.withLock { reregistrationReason }, generation: &generation,
                                  retry: true)
         } else if registration.status == .enabled {
-            problem = check(client, startedIn: startedIn).flatMap { failure in
-                failure.callsForReregistration
-                    ? reregister(client, because: failure.message, startedIn: startedIn) : failure.message
+            if let failure = check(client, startedIn: generation) {
+                problem = failure.callsForReregistration
+                    ? reregister(client, because: failure.message, generation: &generation) : failure.message
+            } else {
+                problem = nil
             }
         } else {
             return
         }
         lock.withLock {
-            // The user installed or removed the helper meanwhile: this is about the old one.
-            guard registrationGeneration == startedIn else { return }
+            // The user installed or removed the helper, or another refresh re-registered it,
+            // meanwhile: this is about the old one.
+            guard registrationGeneration == generation else { return }
             if let problem { log.error("helper: \(problem, privacy: .public)") }
             infoError = problem
         }
@@ -182,7 +189,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         }
     }
 
-    private enum Outcome { case reregistered, refused, alreadyDone }
+    private enum Outcome { case reregistered, refused, alreadyDone, stale }
 
     /// An enabled daemon that fails a check: one left over from another app version or build
     /// (an in-place update), one that drops the connection unanswered, or a job launchd
@@ -193,14 +200,19 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     /// `install()`); once the whole sequence has gone through, it is not repeated in this
     /// launch. Unregistering sends the old daemon SIGTERM, which interrupts the client's
     /// connection; the client drops it and the next call opens a new one, so no explicit
-    /// reconnect is needed. Returns the problem left, if any.
-    private func reregister(_ client: HelperClient, because failure: String, startedIn generation: UInt64,
+    /// reconnect is needed. `generation` is the registration the failed check was about; the
+    /// replacement's is passed back. Returns the problem left, if any.
+    private func reregister(_ client: HelperClient, because failure: String, generation: inout UInt64,
                             retry: Bool = false) -> String? {
         var problem = failure
+        let checked = generation
         let outcome: Outcome = mutationLock.withLock {
             // The user's uninstall may have run between info() and here.
             let enabled = registration.status == .enabled
             let allowed = lock.withLock { () -> Outcome? in
+                // An install, uninstall or another re-registration since the check: the failure
+                // is about a daemon that is gone, not the current one.
+                guard registrationGeneration == checked else { return .stale }
                 guard !userRemoved else { return .refused }
                 switch reregistration {
                 case .none:
@@ -214,6 +226,8 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
             }
             if let allowed { return allowed }
             log.notice("\(failure, privacy: .public): re-registering")
+            // Read back under `mutationLock`, so it is this attempt's, whether or not it failed.
+            defer { generation = lock.withLock { registrationGeneration } }
             do {
                 try finishReregistration()
             } catch {
@@ -223,6 +237,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
             return .reregistered
         }
         switch outcome {
+        case .stale: return nil
         case .refused: return problem
         // Another refresh finished it meanwhile; `failure` may be a stale reason.
         case .alreadyDone: return retry ? check(client, startedIn: generation)?.message : failure
@@ -239,8 +254,10 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     /// The pending steps of a re-registration, from where the last attempt stopped; on
     /// failure the state stays, so the next attempt resumes. Call under `mutationLock`.
     private func finishReregistration() throws {
-        // The old daemon's answer is not about the replacement: checking until it answers.
+        // The old daemon's answer, and any still on its way, is not about the replacement:
+        // checking until it answers.
         lock.withLock {
+            registrationGeneration += 1
             answer = nil
             verified = false
         }

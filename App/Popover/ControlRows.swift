@@ -71,7 +71,7 @@ struct LidRow: View {
         case .needsApproval:
             return (String(localized: "allow Lidless in System Settings → Login Items"), Studio.caution)
         case .checking:
-            return (String(localized: "Checking…"), Studio.inkDim)
+            return (String(localized: "checking…"), Studio.inkDim)
         case .unsigned:
             return (String(localized: "needs a signed build"), Studio.caution)
         case .error(let message):
