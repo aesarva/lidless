@@ -4,7 +4,7 @@
 #   scripts/release.sh 1.0.0             — полный релиз (нужны сертификат и профиль нотаризации)
 #   scripts/release.sh 1.0.0 --unsigned  — проверка без сертификата: ad-hoc подпись, без нотаризации
 #
-# Однократная подготовка — см. раздел «Release» в README.md:
+# Однократная подготовка — см. раздел «Releases» в CONTRIBUTING.md:
 #   SIGN_IDENTITY   "Developer ID Application: Имя (TEAMID)" (по умолчанию ищется в связке ключей)
 #   NOTARY_PROFILE  имя профиля из `xcrun notarytool store-credentials` (по умолчанию Lidless)
 set -euo pipefail
@@ -21,6 +21,11 @@ fi
 
 if $UNSIGNED; then
     SIGN_IDENTITY="-"
+elif grep -q LIDLESS_SPARKLE_PUBLIC_KEY_PLACEHOLDER App/Resources/Info.plist; then
+    # Подписанный релиз без настоящего ключа обновлений выпустил бы приложение, которое не примет ни одной ленты.
+    echo "В App/Resources/Info.plist всё ещё заглушка SUPublicEDKey." >&2
+    echo "Создайте ключ (generate_keys --account lidless, CONTRIBUTING → «Releases») и впишите публичную часть." >&2
+    exit 1
 elif [ -z "${SIGN_IDENTITY:-}" ]; then
     SIGN_IDENTITY="$(security find-identity -v -p codesigning \
         | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)"
@@ -69,8 +74,29 @@ if ! $UNSIGNED; then
     spctl --assess --type open --context context:primary-signature --verbose "$DMG"
 fi
 
+# Лента обновлений только для подписанного релиза. Sparkle сверяет EdDSA, а «только наша команда»
+# гарантирует этот шаг: приложение, демон и Sparkle должны быть подписаны Team ID разработчика.
+if ! $UNSIGNED; then
+    TEAM_ID=6H45P75YYV
+    echo "==> Проверка подписей перед лентой"
+    for target in "$APP" "$APP/Contents/MacOS/LidlessHelper" "$APP/Contents/Frameworks/Sparkle.framework"; do
+        if ! codesign -dv "$target" 2>&1 | grep -q "^TeamIdentifier=$TEAM_ID\$"; then
+            echo "$target не подписан Team ID $TEAM_ID — ленту не создаю." >&2
+            exit 1
+        fi
+    done
+    spctl --assess --type execute "$APP" || { echo "spctl не принял приложение." >&2; exit 1; }
+    spctl --assess --type open --context context:primary-signature "$DMG" \
+        || { echo "spctl не принял DMG." >&2; exit 1; }
+    echo "==> Лента обновлений"
+    BUILD_NUMBER="$(git rev-list --count HEAD)"
+    scripts/make-appcast.sh "$DMG" "$VERSION" "$BUILD_NUMBER" > dist/appcast.xml
+    xmllint --noout dist/appcast.xml
+fi
+
 # Копия без версии — для постоянной ссылки «Скачать».
 cp "$DMG" dist/Lidless.dmg
 
 echo "==> Готово: $(pwd)/$DMG (и dist/Lidless.dmg)"
+if ! $UNSIGNED; then echo "    К релизу прикрепите ещё $(pwd)/dist/appcast.xml"; fi
 shasum -a 256 "$DMG"
