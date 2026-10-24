@@ -39,6 +39,7 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
         currentBuild = Bundle.main.buildVersion
         super.init()
         driver = PanelUserDriver(offerLifetime: offerLifetime,
+                                 automaticChecks: { [weak self] in self?.updater?.automaticallyChecksForUpdates ?? false },
                                  lidIsOpen: lidIsOpen,
                                  onEvent: { [weak self] in self?.apply($0) },
                                  onShowPanel: onShowPanel,
@@ -57,6 +58,9 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
         }
         set {
             withMutation(keyPath: \.automaticallyChecks) { updater.automaticallyChecksForUpdates = newValue }
+            // Off: nothing checks again on its own, not even after an offer withdrawn on expiry.
+            if !newValue { recheckAfterCycle = false }
+            driver.automaticChecksChanged()
         }
     }
 
@@ -110,23 +114,19 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
     /// The end of any check. A background check without an update never calls the UI; this is the
     /// only place it is heard from.
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
-        // Sparkle has closed its session by now and lets a new one start.
-        if recheckAfterCycle {
-            recheckAfterCycle = false
+        let outcome = UpdateErrors.cycleOutcome(failed: error != nil, sparkleCode: Self.sparkleCode(of: error))
+        let expired = recheckAfterCycle
+        recheckAfterCycle = false
+        // An offer withdrawn on expiry, or a cancelled administrator password prompt (Sparkle closed
+        // the session quietly; the update would be gone until the next daily check): checked again
+        // right here, as Sparkle has closed its session by now and lets a new one start; later, a
+        // check Sparkle schedules meanwhile could hold the session. Only with automatic checks on.
+        if UpdateErrors.recheckAfterCycle(offerExpired: expired, outcome: outcome,
+                                          automaticChecks: updater.automaticallyChecksForUpdates) {
             updater.checkForUpdatesInBackground()
             return
         }
-        switch UpdateErrors.cycleOutcome(failed: error != nil, sparkleCode: Self.sparkleCode(of: error)) {
-        case .succeeded:
-            if updateCheck == .updatesInBackground { apply(.backgroundCheckSucceeded) }
-        case .installCanceled:
-            // The administrator password prompt was cancelled. Sparkle closed the session quietly:
-            // offer the update again, or it would be gone until the next daily check. Right here,
-            // as above: later, a check Sparkle schedules meanwhile could hold the session.
-            updater.checkForUpdatesInBackground()
-        case .failed:
-            break
-        }
+        if outcome == .succeeded, updateCheck == .updatesInBackground { apply(.backgroundCheckSucceeded) }
     }
 
     static func event(for error: any Error, userInitiated: Bool) -> UpdateEvent {

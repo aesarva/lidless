@@ -29,4 +29,17 @@ public enum UpdateErrors {
         default: return .failed
         }
     }
+
+    /// Проверять ли заново сразу по концу цикла: предложение снято по сроку или отменён запрос
+    /// пароля (обновление никуда не делось). Только при включённой автоматической проверке —
+    /// иначе это сетевой запрос, которого пользователь не просил.
+    public static func recheckAfterCycle(offerExpired: Bool, outcome: CycleOutcome, automaticChecks: Bool) -> Bool {
+        automaticChecks && (offerExpired || outcome == .installCanceled)
+    }
+
+    /// Снимать ли предложение через сутки. Только при автоматической проверке: снятое без неё
+    /// никто не нашёл бы снова, и «Установить» пропало бы до ручной проверки.
+    public static func offerExpires(automaticChecks: Bool) -> Bool {
+        automaticChecks
+    }
 }

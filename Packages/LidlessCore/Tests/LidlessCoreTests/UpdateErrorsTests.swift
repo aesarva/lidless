@@ -21,4 +21,22 @@ import Testing
         #expect(UpdateErrors.cycleOutcome(failed: true, sparkleCode: 2001) == .failed)
         #expect(UpdateErrors.cycleOutcome(failed: true, sparkleCode: nil) == .failed)
     }
+
+    /// Проверка заново после снятого по сроку предложения или отменённого пароля — только при
+    /// включённой автоматической проверке: иначе это сетевой запрос, которого пользователь не просил.
+    @Test func recheckOnlyWithAutomaticChecks() {
+        #expect(UpdateErrors.recheckAfterCycle(offerExpired: true, outcome: .succeeded, automaticChecks: true))
+        #expect(!UpdateErrors.recheckAfterCycle(offerExpired: true, outcome: .succeeded, automaticChecks: false))
+        #expect(UpdateErrors.recheckAfterCycle(offerExpired: false, outcome: .installCanceled, automaticChecks: true))
+        #expect(!UpdateErrors.recheckAfterCycle(offerExpired: false, outcome: .installCanceled, automaticChecks: false))
+        #expect(!UpdateErrors.recheckAfterCycle(offerExpired: false, outcome: .succeeded, automaticChecks: true))
+        #expect(!UpdateErrors.recheckAfterCycle(offerExpired: false, outcome: .failed, automaticChecks: true))
+    }
+
+    /// Срок у предложения — только при автоматической проверке: без неё снятое предложение
+    /// никто не нашёл бы снова.
+    @Test func offerExpiresOnlyWithAutomaticChecks() {
+        #expect(UpdateErrors.offerExpires(automaticChecks: true))
+        #expect(!UpdateErrors.offerExpires(automaticChecks: false))
+    }
 }

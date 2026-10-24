@@ -21,6 +21,9 @@ final class PanelUserDriver: NSObject, SPUUserDriver {
     /// and checked again, so a Lidless running for weeks does not offer 0.4.1 once 0.4.2 is out.
     private var offerExpiry: Task<Void, Never>?
     private let offerLifetime: Duration
+    /// The user's "Check for updates automatically": only then does an offer expire (and get
+    /// checked again).
+    private let automaticChecks: @MainActor () -> Bool
     /// Quitting for the relaunch gives normal sleep back, so a closed lid holds the install.
     private let gate = InstallGate()
     /// A manual check: its result and errors are shown, a background check's are not.
@@ -28,10 +31,12 @@ final class PanelUserDriver: NSObject, SPUUserDriver {
     private let logger = Logger(subsystem: "io.github.aesarva.Lidless", category: "updates")
 
     /// `offerLifetime`: how long an offer stays up uninstalled (a day; shorter only for debugging).
-    init(offerLifetime: Duration, lidIsOpen: @escaping @MainActor () -> Bool,
+    init(offerLifetime: Duration, automaticChecks: @escaping @MainActor () -> Bool,
+         lidIsOpen: @escaping @MainActor () -> Bool,
          onEvent: @escaping (UpdateEvent) -> Void, onShowPanel: @escaping () -> Void,
          onOfferExpired: @escaping () -> Void) {
         self.offerLifetime = offerLifetime
+        self.automaticChecks = automaticChecks
         self.lidIsOpen = lidIsOpen
         self.onEvent = onEvent
         self.onShowPanel = onShowPanel
@@ -49,6 +54,14 @@ final class PanelUserDriver: NSObject, SPUUserDriver {
         guard let reply = pendingChoice else { return }
         pendingChoice = nil
         relaunchWhenLidOpen { reply(.install) }
+    }
+
+    /// The user turned automatic checks on or off: an offer on display expires (with the full
+    /// lifetime from now) only while they are on.
+    func automaticChecksChanged() {
+        offerExpiry?.cancel()
+        offerExpiry = nil
+        if pendingChoice != nil { scheduleOfferExpiry() }
     }
 
     /// The lid is open: an install held for it goes ahead now. Plain readings change nothing.
@@ -93,6 +106,15 @@ final class PanelUserDriver: NSObject, SPUUserDriver {
         pendingChoice = reply
         pendingStage = state.stage
         offerExpiry?.cancel()
+        offerExpiry = nil
+        scheduleOfferExpiry()
+        onEvent(.found(version: appcastItem.displayVersionString,
+                       notesURL: appcastItem.releaseNotesURL ?? appcastItem.infoURL))
+    }
+
+    /// Without automatic checks the offer stays up: nothing would find it again once withdrawn.
+    private func scheduleOfferExpiry() {
+        guard UpdateErrors.offerExpires(automaticChecks: automaticChecks()) else { return }
         offerExpiry = Task { [weak self] in
             guard let lifetime = self?.offerLifetime else { return }
             try? await Task.sleep(for: lifetime, clock: .continuous)
@@ -103,8 +125,6 @@ final class PanelUserDriver: NSObject, SPUUserDriver {
             self.onOfferExpired()
             self.reply(.dismiss)
         }
-        onEvent(.found(version: appcastItem.displayVersionString,
-                       notesURL: appcastItem.releaseNotesURL ?? appcastItem.infoURL))
     }
 
     func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
