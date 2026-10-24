@@ -164,6 +164,11 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
                 let rejected = nsError.domain == NSCocoaErrorDomain
                     && [NSXPCConnectionInterrupted, NSXPCConnectionInvalid,
                         NSXPCConnectionCodeSigningRequirementFailure].contains(nsError.code)
+                // XPC keeps that connection open, every later message failing the same way:
+                // drop it, so the next call reaches the daemon launchd runs then.
+                if nsError.domain == NSCocoaErrorDomain, nsError.code == NSXPCConnectionCodeSigningRequirementFailure {
+                    self.drop(current)
+                }
                 let message = error.localizedDescription
                 finish(.failure(rejected ? .rejected(message) : .commandFailed(message)))
             }

@@ -129,12 +129,12 @@ private final class Harness: NSObject, NSXPCListenerDelegate, @unchecked Sendabl
         return true
     }
 
-    /// `requirement`: the code-signing requirement the client sets on its connections.
-    func makeClient(timeout: TimeInterval = 2, requirement: String? = nil) -> XPCHelperClient {
+    /// `requirementForFirst`: a code-signing requirement set on the first connection only.
+    func makeClient(timeout: TimeInterval = 2, requirementForFirst: String? = nil) -> XPCHelperClient {
         XPCHelperClient(timeout: timeout) { [self] in
-            lock.withLock { made += 1 }
+            let n = lock.withLock { made += 1; return made }
             let c = NSXPCConnection(listenerEndpoint: listener.endpoint)
-            if let requirement { c.setCodeSigningRequirement(requirement) }
+            if n == 1, let requirementForFirst { c.setCodeSigningRequirement(requirementForFirst) }
             return c
         }
     }
@@ -182,15 +182,27 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
     }
 
     /// A daemon whose bundle was replaced while it runs (an update) no longer satisfies the
-    /// client's code-signing requirement. Re-registration starts the new one: `.rejected`.
-    @Test func daemonFailingTheSignatureRequirementIsRejected() {
-        let client = Harness().makeClient(requirement: #"identifier "io.github.aesarva.Lidless.nobody""#)
+    /// client's code-signing requirement. Re-registration starts the new one: `.rejected`,
+    /// the failed connection is reported lost, and the same client reaches the replacement.
+    @Test func daemonFailingTheSignatureRequirementIsRejected() throws {
+        let harness = Harness()
+        let client = harness.makeClient(requirementForFirst: #"identifier "io.github.aesarva.Lidless.nobody""#)
+        let lost = LockedValue<[UInt64]>([])
+        let counter = Counter()
+        client.onConnectionLost = { generation in
+            lost.value.append(generation)
+            counter.increment()
+        }
         #expect {
             try client.info()
         } throws: { error in
             if case .rejected = error as? HelperError { return true }
             return false
         }
+        #expect(counter.fired.wait(timeout: .now() + 2) == .success)
+        #expect(lost.value == [1])
+        #expect(try client.info().version == "1.0")
+        #expect(harness.connectionsMade == 2)
     }
 
     @Test func replyComesBackAsHelperInfo() throws {
