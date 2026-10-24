@@ -32,7 +32,7 @@
 	<key>SUFeedURL</key>
 	<string>https://github.com/aesarva/lidless/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>LIDLESS_SPARKLE_PUBLIC_KEY_PLACEHOLDER</string>
+	<string>M7eWm5spWOhzYoXKYks1x5CdGgzXBXg5v8QRi+2d0x0=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUScheduledCheckInterval</key>
