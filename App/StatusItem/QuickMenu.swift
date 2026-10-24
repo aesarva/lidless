@@ -6,6 +6,7 @@ enum QuickMenu {
     static func build(
         controller: SessionController,
         helperStatus: HelperStatus,
+        updates: any UpdateSource,
         helperBusy: Bool = false,
         onSettings: @escaping (SettingsTab) -> Void = { _ in }
     ) -> NSMenu {
@@ -44,6 +45,9 @@ enum QuickMenu {
         menu.addItem(lid)
         menu.addItem(.separator())
 
+        if case .available(let version, _) = updates.state {
+            menu.addItem(ActionItem(String(localized: "Install version \(version)")) { updates.install() })
+        }
         menu.addItem(ActionItem(String(localized: "Settings…")) { onSettings(.general) })
         let quit = ActionItem(String(localized: "Quit Lidless")) { NSApp.terminate(nil) }
         quit.keyEquivalent = "q"

@@ -6,17 +6,21 @@ import LidlessCore
 final class StatusItemController {
     private let controller: SessionController
     private let helper: HelperModel
+    private let updates: any UpdateSource
     private let panel: PanelController
     private let item: NSStatusItem
     private var lastPresentation: StatusPresentation?
+    private var lastSpokenLabel: String?
     private let openSettings: (SettingsTab) -> Void
 
-    init(controller: SessionController, helper: HelperModel, openSettings: @escaping (SettingsTab) -> Void) {
+    init(controller: SessionController, helper: HelperModel, updates: any UpdateSource,
+         openSettings: @escaping (SettingsTab) -> Void) {
         self.controller = controller
         self.helper = helper
+        self.updates = updates
         self.openSettings = openSettings
         var closePanel: () -> Void = {}
-        panel = PanelController(content: PopoverView(controller: controller, helper: helper) { tab in
+        panel = PanelController(content: PopoverView(controller: controller, helper: helper, updates: updates) { tab in
             closePanel()
             openSettings(tab)
         })
@@ -35,10 +39,18 @@ final class StatusItemController {
         let presentation = StatusPresentation.make(
             state: controller.state,
             attention: controller.attention,
+            updateAvailable: updates.showsBadge,
             showTimerText: controller.settings.showTimerInMenuBar,
             now: Date()
         )
-        guard presentation != lastPresentation, let button = item.button else { return }
+        guard let button = item.button else { return }
+        // Said even when the orange dot is the one drawn: the update is there all the same.
+        let spoken = updates.showsBadge ? "Lidless, " + String(localized: "update available") : nil
+        if spoken != lastSpokenLabel {
+            lastSpokenLabel = spoken
+            button.setAccessibilityLabel(spoken)
+        }
+        guard presentation != lastPresentation else { return }
         lastPresentation = presentation
         button.image = IconRenderer.image(for: presentation)
         if let text = presentation.timerText {
@@ -60,6 +72,7 @@ final class StatusItemController {
             item.menu = QuickMenu.build(
                 controller: controller,
                 helperStatus: helper.status,
+                updates: updates,
                 helperBusy: helper.isWorking,
                 onSettings: openSettings
             )

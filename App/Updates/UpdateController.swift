@@ -145,3 +145,19 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
         if model.showsBadge != showsBadge { showsBadge = model.showsBadge }
     }
 }
+
+/// What the panel, the icon and Settings read and do about updates: the live controller, or a fixed
+/// state in previews and debug snapshots (no Sparkle there).
+@MainActor
+protocol UpdateSource: AnyObject, Observable {
+    var state: UpdateState { get }
+    var showsBadge: Bool { get }
+    var canCheckNow: Bool { get }
+    var currentVersion: String { get }
+    var currentBuild: String { get }
+    var automaticallyChecks: Bool { get set }
+    func install()
+    func checkNow()
+}
+
+extension UpdateController: UpdateSource {}

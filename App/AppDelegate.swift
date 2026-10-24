@@ -107,10 +107,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Lid mode wanted while the helper is in error: checked again in the background, so the
         // switch never waits for a call that would time out.
         controller.onHelperRefreshNeeded = { [weak helper] in helper?.refresh() }
-        settingsWindow = SettingsWindowController(controller: controller, helper: helper)
+        settingsWindow = SettingsWindowController(controller: controller, helper: helper, updates: updates)
         statusItem = StatusItemController(
             controller: controller,
             helper: helper,
+            updates: updates,
             openSettings: { [weak self] tab in self?.settingsWindow.show(tab: tab) }
         )
         // Order matters: take the first readings (engine.start() refreshes immediately), then

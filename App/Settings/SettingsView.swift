@@ -12,11 +12,12 @@ struct SettingsView: View {
     let controller: SessionController
     let helper: HelperModel
     let loginItem: LoginItem
+    let updates: any UpdateSource
     @Bindable var navigation: SettingsNavigation
 
     var body: some View {
         TabView(selection: $navigation.tab) {
-            GeneralTab(controller: controller, loginItem: loginItem)
+            GeneralTab(controller: controller, loginItem: loginItem, updates: updates)
                 .tabItem { Label("General", systemImage: "gearshape") }
                 .tag(SettingsTab.general)
             SafetyTab(controller: controller)
@@ -25,7 +26,7 @@ struct SettingsView: View {
             HelperTab(controller: controller, helper: helper)
                 .tabItem { Label("Helper", systemImage: "wrench.and.screwdriver") }
                 .tag(SettingsTab.helper)
-            AboutTab()
+            AboutTab(updates: updates)
                 .tabItem { Label("About", systemImage: "info.circle") }
                 .tag(SettingsTab.about)
         }

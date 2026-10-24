@@ -6,13 +6,15 @@ import LidlessCore
 final class SettingsWindowController {
     private let controller: SessionController
     private let helper: HelperModel
+    private let updates: any UpdateSource
     private let loginItem = LoginItem()
     private let navigation = SettingsNavigation()
     private var window: NSWindow?
 
-    init(controller: SessionController, helper: HelperModel) {
+    init(controller: SessionController, helper: HelperModel, updates: any UpdateSource) {
         self.controller = controller
         self.helper = helper
+        self.updates = updates
     }
 
     func show(tab: SettingsTab) {
@@ -20,7 +22,8 @@ final class SettingsWindowController {
         helper.refresh()
         loginItem.refresh()
         if window == nil {
-            let view = SettingsView(controller: controller, helper: helper, loginItem: loginItem, navigation: navigation)
+            let view = SettingsView(controller: controller, helper: helper, loginItem: loginItem, updates: updates,
+                                    navigation: navigation)
             let host = NSHostingController(rootView: view)
             // The window follows each tab's natural height, so no tab is ever clipped.
             host.sizingOptions = [.preferredContentSize]

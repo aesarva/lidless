@@ -58,6 +58,27 @@ final class PreviewBackend: PrivilegedBackend {
     func openSystemSettings() {}
 }
 
+/// A fixed update state: what the panel, the icon and Settings show, without Sparkle.
+@MainActor @Observable final class PreviewUpdates: UpdateSource {
+    var state: UpdateState
+    var canCheckNow = true
+    var automaticallyChecks = true
+    let currentVersion = Bundle.main.shortVersion
+    let currentBuild = Bundle.main.buildVersion
+
+    init(_ state: UpdateState = .idle) { self.state = state }
+
+    var showsBadge: Bool {
+        switch state {
+        case .available, .downloading, .installing, .waitingForLid: true
+        default: false
+        }
+    }
+
+    func install() {}
+    func checkNow() {}
+}
+
 @MainActor func previewController(
     lid: Bool = false, readings: SafetyReadings? = nil
 ) -> SessionController {
@@ -77,9 +98,10 @@ func previewReadings(battery: Int? = 82, onBattery: Bool = false, thermal: Therm
 }
 
 @MainActor func previewView(
-    _ c: SessionController, helper: HelperStatus = .installed
+    _ c: SessionController, helper: HelperStatus = .installed, updates: UpdateState = .idle
 ) -> some View {
-    PopoverView(controller: c, helper: HelperModel(backend: PreviewBackend(helper)), openSettings: { _ in })
+    PopoverView(controller: c, helper: HelperModel(backend: PreviewBackend(helper)),
+                updates: PreviewUpdates(updates), openSettings: { _ in })
 }
 
 #Preview("Off") {
@@ -121,5 +143,15 @@ func previewReadings(battery: Int? = 82, onBattery: Bool = false, thermal: Therm
 
 #Preview("Unsigned build") {
     previewView(previewController(readings: previewReadings()), helper: .unsigned)
+}
+
+#Preview("Update available") {
+    previewView(previewController(readings: previewReadings()),
+                updates: .available(version: "0.4.1", notesURL: URL(string: "https://github.com/aesarva/lidless")))
+}
+
+#Preview("Update downloading") {
+    previewView(previewController(readings: previewReadings()),
+                updates: .downloading(version: "0.4.1", progress: 0.42))
 }
 #endif
