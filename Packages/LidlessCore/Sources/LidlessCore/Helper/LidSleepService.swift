@@ -33,6 +33,9 @@ public struct LidHold: Equatable, Sendable {
     /// A fresh `info`, queued after every command sent so far: true when the daemon answered
     /// that it owns nothing. Not called at all when a new wish came in meanwhile.
     func confirmReleased(_ done: @escaping @MainActor (Bool) -> Void)
+    /// Like `confirmReleased`, before the helper is removed: when no daemon can run, true only
+    /// if the ownership marker is known to be absent (a daemon that cannot run is no proof).
+    func confirmReleasedForRemoval(_ done: @escaping @MainActor (Bool) -> Void)
     /// The daemon connection of `generation` dropped: a hold it carried is gone, and is taken
     /// again while wanted.
     func connectionLost(generation: UInt64)
@@ -66,6 +69,8 @@ public struct LidHold: Equatable, Sendable {
     }
 
     private let backend: PrivilegedBackend
+    /// Whether the daemon's ownership marker is known to be absent (read on the queue).
+    private let markerAbsent: @Sendable () -> Bool
     private let queue = DispatchQueue(label: "io.github.aesarva.Lidless.lid-sleep")
     private let shared = Shared()
     /// Steps queued whose answer has not reached the main actor yet.
@@ -74,9 +79,13 @@ public struct LidHold: Equatable, Sendable {
     public private(set) var hold = LidHold()
 
     /// `first` runs on the queue before any command (the 0.2.0 reset, which must not race a
-    /// new hold).
-    public init(backend: PrivilegedBackend, first: (@Sendable () -> Void)? = nil) {
+    /// new hold). `markerAbsent`: whether the daemon's ownership marker is known to be absent
+    /// (`confirmReleasedForRemoval` while no daemon can run).
+    public init(backend: PrivilegedBackend,
+                markerAbsent: @escaping @Sendable () -> Bool = { FileOwnershipStore().isKnownAbsent() },
+                first: (@Sendable () -> Void)? = nil) {
         self.backend = backend
+        self.markerAbsent = markerAbsent
         if let first { queue.async(execute: first) }
     }
 
@@ -107,13 +116,24 @@ public struct LidHold: Equatable, Sendable {
     }
 
     public func confirmReleased(_ done: @escaping @MainActor (Bool) -> Void) {
+        // No daemon is registered (or allowed to run): nothing holds for this app.
+        confirm(withoutDaemon: { true }, done)
+    }
+
+    public func confirmReleasedForRemoval(_ done: @escaping @MainActor (Bool) -> Void) {
+        // The daemon leaves its marker while disablesleep may still be 1 for it.
+        confirm(withoutDaemon: markerAbsent, done)
+    }
+
+    /// `withoutDaemon` answers, on the queue, when no daemon is registered or allowed to run.
+    private func confirm(withoutDaemon: @escaping @Sendable () -> Bool,
+                         _ done: @escaping @MainActor (Bool) -> Void) {
         let wish = shared.withLock { $0.wish }
         queue.async { [weak self, backend] in
             let released: Bool
             switch backend.status() {
             case .notInstalled, .needsApproval, .unsigned:
-                // No daemon is registered (or allowed to run): nothing holds for this app.
-                released = true
+                released = withoutDaemon()
             case .installed, .checking, .error:
                 released = (try? backend.freshInfo()).map { !$0.owned } ?? false
             }

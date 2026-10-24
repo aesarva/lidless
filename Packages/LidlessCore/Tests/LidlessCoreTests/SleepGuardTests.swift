@@ -588,4 +588,19 @@ import Testing
         #expect(!store.exists())
         try store.remove()
     }
+
+    /// Only "no such file" is absence; a path that cannot be checked is not.
+    @Test func knownAbsentOnlyWhenTheFileIsMissing() throws {
+        let url = tempURL()
+        let root = url.deletingLastPathComponent().deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FileOwnershipStore(url: url)
+        #expect(store.isKnownAbsent())
+        try store.create()
+        #expect(!store.isKnownAbsent())
+        // A regular file in place of the directory: the check fails with ENOTDIR.
+        let blocked = url.deletingLastPathComponent().appendingPathComponent("file")
+        try Data().write(to: blocked)
+        #expect(!FileOwnershipStore(url: blocked.appendingPathComponent("sleep-owned")).isKnownAbsent())
+    }
 }

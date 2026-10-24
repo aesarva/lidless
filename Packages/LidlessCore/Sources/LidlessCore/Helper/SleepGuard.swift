@@ -18,6 +18,13 @@ public struct FileOwnershipStore: OwnershipStore {
 
     public func exists() -> Bool { FileManager.default.fileExists(atPath: url.path) }
 
+    /// True only when the file is known not to exist: a check that fails for another reason
+    /// (a permission error, say) is no proof.
+    public func isKnownAbsent() -> Bool {
+        var info = stat()
+        return lstat(url.path, &info) != 0 && errno == ENOENT
+    }
+
     public func create() throws {
         let fm = FileManager.default
         try fm.createDirectory(

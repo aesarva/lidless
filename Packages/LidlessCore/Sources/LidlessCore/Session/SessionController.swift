@@ -183,8 +183,10 @@ import os
         )
         helperRemovalInProgress = true
         setLidMode(false)
+        // A release that failed earlier, with lid mode unwanted already, is sent again.
+        lid.retry()
         // Queued after the release; always answered, as the wish cannot change until the end.
-        lid.confirmReleased { [weak self] released in
+        lid.confirmReleasedForRemoval { [weak self] released in
             if released { self?.releaseConfirmed() }
             done(point, released)
         }

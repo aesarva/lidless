@@ -417,7 +417,9 @@ struct FakeError: Error {}
     /// What `confirmReleased` answers.
     var confirmResult = true
     var confirmCalls = 0
-    /// `confirmReleased` waits for `deliverConfirm()`.
+    /// `confirmReleasedForRemoval` calls, answered like `confirmReleased`.
+    var removalConfirmCalls = 0
+    /// `confirmReleased` and `confirmReleasedForRemoval` wait for `deliverConfirm()`.
     var holdConfirm = false
     private var heldConfirm: (wishes: Int, done: @MainActor (Bool) -> Void)?
 
@@ -448,6 +450,15 @@ struct FakeError: Error {}
 
     func confirmReleased(_ done: @escaping @MainActor (Bool) -> Void) {
         confirmCalls += 1
+        if holdConfirm {
+            heldConfirm = (wanted.count, done)
+        } else {
+            answerConfirm(done)
+        }
+    }
+
+    func confirmReleasedForRemoval(_ done: @escaping @MainActor (Bool) -> Void) {
+        removalConfirmCalls += 1
         if holdConfirm {
             heldConfirm = (wanted.count, done)
         } else {

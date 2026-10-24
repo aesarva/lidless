@@ -194,6 +194,42 @@ struct LidSleepServiceTests {
         }
     }
 
+    /// For a removal, no registered daemon is no proof: only an ownership marker known to be
+    /// absent is (it is left while the daemon may still hold disablesleep).
+    @Test func removalConfirmWithoutRunningDaemonReadsTheMarker() async {
+        for status in [HelperStatus.notInstalled, .needsApproval, .unsigned] {
+            for markerPresent in [true, false] {
+                let backend = FakeBackend()
+                backend.stubStatus = status
+                let marker = MemoryOwnershipStore(exists: markerPresent)
+                let svc = LidSleepService(backend: backend, markerAbsent: { !marker.exists() })
+                var confirmed: Bool?
+                svc.confirmReleasedForRemoval { confirmed = $0 }
+                await until { confirmed != nil }
+                #expect(confirmed == !markerPresent)
+                #expect(backend.freshInfoCalls == 0)
+            }
+        }
+    }
+
+    /// A running daemon must answer afresh that it owns nothing; no answer is a refusal.
+    @Test func removalConfirmWithRunningDaemonNeedsFreshInfo() async {
+        for status in [HelperStatus.installed, .checking, .error("x")] {
+            for (owned, fails, expected) in [(false, false, true), (true, false, false), (false, true, false)] {
+                let backend = FakeBackend()
+                backend.stubStatus = status
+                backend.stubInfo = HelperInfo(version: "0.4.0", build: "1", sleepDisabled: owned, owned: owned)
+                if fails { backend.freshInfoError = .timedOut }
+                let svc = LidSleepService(backend: backend, markerAbsent: { true })
+                var confirmed: Bool?
+                svc.confirmReleasedForRemoval { confirmed = $0 }
+                await until { confirmed != nil }
+                #expect(confirmed == expected)
+                #expect(backend.freshInfoCalls == 1)
+            }
+        }
+    }
+
     /// An acquisition refused while the daemon was being checked goes through once it is
     /// verified, even when the refusal comes back after the status changed.
     @Test func refusedEnableRetriesWhenVerifiedMeanwhile() async {

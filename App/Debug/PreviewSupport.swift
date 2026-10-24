@@ -31,6 +31,7 @@ import LidlessCore
     }
     func retry() {}
     func confirmReleased(_ done: @escaping @MainActor (Bool) -> Void) { done(true) }
+    func confirmReleasedForRemoval(_ done: @escaping @MainActor (Bool) -> Void) { done(true) }
     func connectionLost(generation: UInt64) {}
 }
 
