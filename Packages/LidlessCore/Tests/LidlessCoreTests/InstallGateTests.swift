@@ -36,4 +36,22 @@ import Testing
         #expect(!gate.lidOpened())
         #expect(calls == 0)
     }
+
+    @Test func secondWaitReplacesPendingReply() {
+        let gate = InstallGate()
+        var first = 0, second = 0
+        gate.ready(lidOpen: false) { first += 1 }
+        gate.ready(lidOpen: false) { second += 1 }
+        gate.lidOpened()
+        #expect(first == 0 && second == 1)
+    }
+
+    @Test func openReadyClearsPendingReply() {
+        let gate = InstallGate()
+        var first = 0
+        gate.ready(lidOpen: false) { first += 1 }
+        gate.ready(lidOpen: true) {}
+        #expect(!gate.lidOpened())
+        #expect(first == 0)
+    }
 }

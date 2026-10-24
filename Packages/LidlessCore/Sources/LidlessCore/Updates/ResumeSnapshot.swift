@@ -19,7 +19,9 @@ public struct ResumeSnapshot: Codable, Equatable, Sendable {
         endsAt = session.endsAt
         keepDisplayOn = session.keepDisplayOn
         lidModeActive = session.lidModeActive
+        // Режим крышки ещё ждал помощника: без причины это выглядело бы как намеренно выключенный.
         lidModeSuspendedReason = session.lidModeSuspendedReason
+            ?? (session.lidModePending && !session.lidModeActive ? .helperUnavailable : nil)
         lidModeEnabledAt = session.lidModeEnabledAt
     }
 

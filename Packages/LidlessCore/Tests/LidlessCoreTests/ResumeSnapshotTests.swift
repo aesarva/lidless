@@ -54,4 +54,26 @@ import Testing
         #expect(decoded == s)
         #expect(decoded.lidModeSuspendedReason == .thermal)
     }
+
+    @Test func pendingLidModeSurvivesAsSuspension() throws {
+        let session = Session(startedAt: t0, lidModeActive: false, lidModePending: true, lidModeEnabledAt: t0 + 3)
+        let s = ResumeSnapshot(session: session, savedAt: t0)
+        let decoded = try JSONDecoder().decode(ResumeSnapshot.self, from: JSONEncoder().encode(s))
+        #expect(!decoded.lidModeActive)
+        #expect(decoded.lidModeSuspendedReason == .helperUnavailable)
+        #expect(decoded.lidModeEnabledAt == t0 + 3)
+    }
+
+    @Test func boundaries() {
+        #expect(snapshot().usable(now: t0 + 120) != nil)
+        #expect(snapshot(endsAt: t0 + 60).usable(now: t0 + 60) == nil)
+    }
+
+    @Test func corruptBlobIsDroppedByTake() {
+        let defaults = UserDefaults(suiteName: "ResumeSnapshotTests.\(UUID())")!
+        defaults.set(Data("junk".utf8), forKey: "resumeAfterUpdate")
+        let store = UserDefaultsResumeStore(defaults: defaults)
+        #expect(store.take() == nil)
+        #expect(defaults.data(forKey: "resumeAfterUpdate") == nil)
+    }
 }
