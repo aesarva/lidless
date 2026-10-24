@@ -74,7 +74,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notifier.onExtend = { [weak controller] minutes in controller?.extend(byMinutes: minutes) }
 
         // -UpdateFeedURL works in Release too: Sparkle checks the EdDSA and code signatures anyway.
-        let offerLifetime = (args["UpdateOfferLifetime"] as? String).flatMap(Double.init).map { Duration.seconds($0) }
+        // -UpdateOfferLifetime <seconds> shortens the offer for testing; kept within 10 s … 7 days,
+        // since 0 would re-check in a loop and a huge value would overflow the sleep.
+        let offerLifetime = (args["UpdateOfferLifetime"] as? String).flatMap(Double.init)
+            .flatMap { $0.isFinite ? Duration.seconds(min(max($0, 10), 7 * 24 * 60 * 60)) : nil }
         let updates = UpdateController(
             feedOverride: args["UpdateFeedURL"] as? String,
             offerLifetime: offerLifetime ?? .seconds(24 * 60 * 60),

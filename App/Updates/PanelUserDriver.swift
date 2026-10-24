@@ -14,6 +14,9 @@ final class PanelUserDriver: NSObject, SPUUserDriver {
     private let lidIsOpen: @MainActor () -> Bool
     /// Sparkle's answer to a found update; called exactly once.
     private var pendingChoice: ((SPUUserUpdateChoice) -> Void)?
+    /// How far the offered update already got. `.installing` (resumed after an earlier launch):
+    /// "install" quits and relaunches at once, with no `showReady` in between.
+    private var pendingStage: SPUUserUpdateStage = .notDownloaded
     /// Until it is answered, Sparkle checks for nothing else. After a day the offer is withdrawn
     /// and checked again, so a Lidless running for weeks does not offer 0.4.1 once 0.4.2 is out.
     private var offerExpiry: Task<Void, Never>?
@@ -36,12 +39,32 @@ final class PanelUserDriver: NSObject, SPUUserDriver {
     }
 
     func install() {
-        reply(.install)
+        guard pendingStage == .installing else {
+            // Downloading and extracting come first; the relaunch waits at `showReady`.
+            reply(.install)
+            return
+        }
+        offerExpiry?.cancel()
+        offerExpiry = nil
+        guard let reply = pendingChoice else { return }
+        pendingChoice = nil
+        relaunchWhenLidOpen { reply(.install) }
     }
 
     /// The lid is open: an install held for it goes ahead now. Plain readings change nothing.
     func lidDidOpen() {
         if gate.lidOpened() { onEvent(.installing) }
+    }
+
+    /// Every answer that quits for the relaunch goes through here: at once with the lid open,
+    /// otherwise held until `lidDidOpen()`.
+    private func relaunchWhenLidOpen(_ install: @escaping () -> Void) {
+        if gate.ready(lidOpen: lidIsOpen(), reply: install) {
+            onEvent(.installing)
+        } else {
+            logger.info("Install waits for the lid to open")
+            onEvent(.waitingForOpenLid)
+        }
     }
 
     private func reply(_ choice: SPUUserUpdateChoice) {
@@ -68,6 +91,7 @@ final class PanelUserDriver: NSObject, SPUUserDriver {
                          reply: @escaping (SPUUserUpdateChoice) -> Void) {
         userInitiated = false
         pendingChoice = reply
+        pendingStage = state.stage
         offerExpiry?.cancel()
         offerExpiry = Task { [weak self] in
             guard let lifetime = self?.offerLifetime else { return }
@@ -123,12 +147,7 @@ final class PanelUserDriver: NSObject, SPUUserDriver {
     func showExtractionReceivedProgress(_ progress: Double) {}
 
     func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
-        onEvent(.installing)
-        // Closed (or in clamshell): the answer waits for `lidDidOpen()`.
-        if !gate.ready(lidOpen: lidIsOpen(), reply: { reply(.install) }) {
-            logger.info("Install waits for the lid to open")
-            onEvent(.waitingForOpenLid)
-        }
+        relaunchWhenLidOpen { reply(.install) }
     }
 
     func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool,
@@ -155,6 +174,7 @@ final class PanelUserDriver: NSObject, SPUUserDriver {
         offerExpiry?.cancel()
         offerExpiry = nil
         pendingChoice = nil
+        pendingStage = .notDownloaded
         gate.cancel()
         userInitiated = false
         onEvent(.dismissed)

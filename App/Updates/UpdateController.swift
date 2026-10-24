@@ -16,8 +16,7 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
     let currentVersion: String
     let currentBuild: String
 
-    /// The whole model, download counters included; changes with every chunk, so not observed.
-    @ObservationIgnored private(set) var model = UpdateModel()
+    @ObservationIgnored private var model = UpdateModel()
     @ObservationIgnored private let feedOverride: String?
     @ObservationIgnored private let onWillRelaunch: @MainActor () -> Void
     @ObservationIgnored private var driver: PanelUserDriver!
@@ -28,8 +27,8 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
     @ObservationIgnored private let logger = Logger(subsystem: "io.github.aesarva.Lidless", category: "updates")
 
     /// `feedOverride`: a feed instead of `SUFeedURL` (launch argument `-UpdateFeedURL`);
-    /// `offerLifetime`: how long an offer stays up uninstalled (debug argument
-    /// `-UpdateOfferLifetime <seconds>`); `lidIsOpen`: whether installing (and so quitting) is safe
+    /// `offerLifetime`: how long an offer stays up uninstalled (launch argument
+    /// `-UpdateOfferLifetime <seconds>`, any build); `lidIsOpen`: whether installing (and so quitting) is safe
     /// now; `onWillRelaunch`: Sparkle is about to quit this copy for the new one.
     init(feedOverride: String?, offerLifetime: Duration = .seconds(24 * 60 * 60),
          onShowPanel: @escaping () -> Void, lidIsOpen: @escaping @MainActor () -> Bool,
@@ -122,8 +121,9 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
             if updateCheck == .updatesInBackground { apply(.backgroundCheckSucceeded) }
         case .installCanceled:
             // The administrator password prompt was cancelled. Sparkle closed the session quietly:
-            // offer the update again, or it would be gone until the next daily check.
-            Task { @MainActor [weak self] in self?.updater.checkForUpdatesInBackground() }
+            // offer the update again, or it would be gone until the next daily check. Right here,
+            // as above: later, a check Sparkle schedules meanwhile could hold the session.
+            updater.checkForUpdatesInBackground()
         case .failed:
             break
         }
