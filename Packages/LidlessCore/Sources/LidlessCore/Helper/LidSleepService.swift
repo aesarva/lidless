@@ -130,13 +130,11 @@ public struct LidHold: Equatable, Sendable {
                          _ done: @escaping @MainActor (Bool) -> Void) {
         let wish = shared.withLock { $0.wish }
         queue.async { [weak self, backend] in
-            let released: Bool
-            switch backend.status() {
-            case .notInstalled, .needsApproval, .unsigned:
-                released = withoutDaemon()
-            case .installed, .checking, .error:
-                released = (try? backend.freshInfo()).map { !$0.owned } ?? false
-            }
+            // The registration decides, not the status: an unfinished re-registration is
+            // `.error` with no daemon registered, and that one could never answer.
+            let released = backend.daemonMayRun
+                ? (try? backend.freshInfo()).map { !$0.owned } ?? false
+                : withoutDaemon()
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
@@ -227,21 +225,19 @@ public struct LidHold: Equatable, Sendable {
                 return StepResult(wish: wish, failure: HelperError.message(for: error))
             }
         }
-        switch status {
-        case .notInstalled, .needsApproval, .unsigned:
+        guard backend.daemonMayRun else {
             // No daemon is registered (or allowed to run): nothing holds for this app.
             shared.withLock { $0.heldGeneration = nil }
             return StepResult(wish: wish, failure: nil)
-        case .installed, .checking, .error:
-            // Sent even with nothing held here: the daemon may still hold for an earlier
-            // request. A successful reply releases this app's hold.
-            do {
-                try backend.setSleepDisabled(false)
-                shared.withLock { $0.heldGeneration = nil }
-                return StepResult(wish: wish, failure: nil)
-            } catch {
-                return StepResult(wish: wish, failure: HelperError.message(for: error))
-            }
+        }
+        // Sent even with nothing held here: the daemon may still hold for an earlier
+        // request. A successful reply releases this app's hold.
+        do {
+            try backend.setSleepDisabled(false)
+            shared.withLock { $0.heldGeneration = nil }
+            return StepResult(wish: wish, failure: nil)
+        } catch {
+            return StepResult(wish: wish, failure: HelperError.message(for: error))
         }
     }
 

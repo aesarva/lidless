@@ -48,6 +48,10 @@ public extension HelperError {
 public protocol PrivilegedBackend: Sendable {
     /// Cheap enough for the main thread: never waits for the daemon.
     func status() -> HelperStatus
+    /// A daemon may be running for the current registration: SMAppService reports it enabled
+    /// (and this build can talk to it). Whatever `status()` says: a re-registration that did
+    /// not finish is `.error` with no daemon registered. Never waits for the daemon.
+    var daemonMayRun: Bool { get }
     /// Asks the daemon how it is doing and updates what `status()` reports. Blocks for up
     /// to the XPC timeout: never call it on the main thread.
     func refreshInfo()

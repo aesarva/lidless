@@ -247,6 +247,27 @@ struct SessionHelperRemovalTests {
         }
     }
 
+    /// With the helper service: a re-registration that did not finish leaves no daemon
+    /// registered while the status is `.error`. The marker decides, so Remove is not refused
+    /// for a daemon that cannot answer.
+    @Test func removalWithAnUnregisteredDaemonInErrorFollowsTheMarker() async {
+        for markerPresent in [true, false] {
+            let backend = FakeBackend()
+            backend.stubStatus = .error("re-registering failed")
+            backend.daemonMayRunOverride = false
+            backend.freshInfoError = .rejected("not registered")
+            let (c, _) = serviceController(backend, marker: MemoryOwnershipStore(exists: markerPresent))
+            c.settings.lidModeEnabled = true
+            c.start(.indefinite)
+            var results: [Bool] = []
+            c.beginHelperRemoval { _, ok in results.append(ok) }
+            await until { results.count == 1 }
+            #expect(results == [!markerPresent])
+            #expect(backend.freshInfoCalls == 0)
+            #expect(backend.setCalls.isEmpty)
+        }
+    }
+
     /// With the helper service: an earlier failed release, with lid mode already unwanted,
     /// is sent again ahead of the check.
     @Test func removalResendsAFailedReleaseToTheDaemon() async {

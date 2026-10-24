@@ -301,6 +301,38 @@ private func makeBackend(
         #expect(backend.status() == .notInstalled)
     }
 
+    /// Nothing registered (a re-registration unregistered it and failed to register again):
+    /// Remove has nothing to unregister, and nothing to fail on.
+    @Test func uninstallWithNothingRegisteredSucceeds() throws {
+        for status in [RegistrationStatus.notRegistered, .notFound] {
+            let (backend, registration) = makeBackend(status)
+            try backend.uninstall()
+            #expect(registration.unregisterCalls == 0)
+            #expect(backend.status() == .notInstalled)
+        }
+    }
+
+    /// Only an enabled registration may have a daemon running, whatever the status says.
+    @Test func daemonMayRunFollowsTheRegistration() {
+        #expect(makeBackend(.enabled).0.daemonMayRun)
+        #expect(!makeBackend(.notRegistered).0.daemonMayRun)
+        #expect(!makeBackend(.notFound).0.daemonMayRun)
+        #expect(!makeBackend(.requiresApproval).0.daemonMayRun)
+        #expect(!makeBackend(.enabled, client: nil).0.daemonMayRun)
+
+        // Unregistered by a re-registration whose register() failed: `.error`, no daemon.
+        let client = FakeHelperClient()
+        client.stubInfo = HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        registration.registerError = RegisterError()
+        backend.refreshInfo()
+        guard case .error = backend.status() else {
+            Issue.record("failed re-registration is not .error")
+            return
+        }
+        #expect(!backend.daemonMayRun)
+    }
+
     @Test func setSleepDisabledPassesThrough() throws {
         let client = FakeHelperClient()
         let (backend, _) = makeBackend(client: client)
@@ -869,6 +901,7 @@ private final class ReregisteringAfterStatus: PrivilegedBackend, @unchecked Send
         }
         return status
     }
+    var daemonMayRun: Bool { inner.daemonMayRun }
     func refreshInfo() { inner.refreshInfo() }
     func lastInfo() -> HelperInfo? { inner.lastInfo() }
     func freshInfo() throws -> HelperInfo { try inner.freshInfo() }

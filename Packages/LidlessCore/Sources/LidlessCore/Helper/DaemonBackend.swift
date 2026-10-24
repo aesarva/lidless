@@ -82,6 +82,10 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         }
     }
 
+    public var daemonMayRun: Bool {
+        client != nil && registration.status == .enabled
+    }
+
     public func lastInfo() -> HelperInfo? {
         lock.withLock { answer }
     }
@@ -347,7 +351,8 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
             outstandingUnregister = nil
             registrationGeneration += 1
         }
-        guard registration.status != .notRegistered else { return }
+        // Nothing registered (e.g. a re-registration that did not finish): nothing to undo.
+        guard registration.status != .notRegistered, registration.status != .notFound else { return }
         do {
             try registration.unregister()
         } catch {

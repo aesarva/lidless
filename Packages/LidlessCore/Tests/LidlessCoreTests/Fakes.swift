@@ -115,8 +115,25 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
     private var _freshInfoCalls = 0
     var freshInfoCalls: Int { lock.withLock { _freshInfoCalls } }
 
+    private var _daemonMayRunOverride: Bool?
+    /// What `daemonMayRun` answers; nil: a daemon may run while `stubStatus` is `.installed`,
+    /// `.checking` or `.error` (registered and enabled).
+    var daemonMayRunOverride: Bool? {
+        get { lock.withLock { _daemonMayRunOverride } }
+        set { lock.withLock { _daemonMayRunOverride = newValue } }
+    }
+
     func status() -> HelperStatus {
         lock.withLock { _statusScript.isEmpty ? _status : _statusScript.removeFirst() }
+    }
+    var daemonMayRun: Bool {
+        lock.withLock {
+            if let _daemonMayRunOverride { return _daemonMayRunOverride }
+            switch _status {
+            case .installed, .checking, .error: return true
+            case .notInstalled, .needsApproval, .unsigned: return false
+            }
+        }
     }
     func lastInfo() -> HelperInfo? { stubInfo }
     func freshInfo() throws -> HelperInfo {

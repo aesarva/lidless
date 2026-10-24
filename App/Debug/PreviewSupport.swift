@@ -39,6 +39,7 @@ final class PreviewBackend: PrivilegedBackend {
     let current: HelperStatus
     init(_ s: HelperStatus) { current = s }
     func status() -> HelperStatus { current }
+    var daemonMayRun: Bool { [.installed, .checking].contains(current) }
     func lastInfo() -> HelperInfo? {
         guard current == .installed else { return nil }
         return HelperInfo(version: Bundle.main.shortVersion, build: Bundle.main.buildVersion,

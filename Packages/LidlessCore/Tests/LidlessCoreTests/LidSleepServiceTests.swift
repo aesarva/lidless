@@ -239,6 +239,39 @@ struct LidSleepServiceTests {
         }
     }
 
+    /// A re-registration that did not finish is `.error` with no daemon registered: the
+    /// registration, not the status, decides that the marker is the proof.
+    @Test func removalConfirmWithAnUnregisteredDaemonInErrorReadsTheMarker() async {
+        for markerPresent in [true, false] {
+            let backend = FakeBackend()
+            backend.stubStatus = .error("re-registering failed")
+            backend.daemonMayRunOverride = false
+            let marker = MemoryOwnershipStore(exists: markerPresent)
+            let svc = LidSleepService(backend: backend, markerAbsent: { !marker.exists() })
+            var confirmed: Bool?
+            svc.confirmReleasedForRemoval { confirmed = $0 }
+            await until { confirmed != nil }
+            #expect(confirmed == !markerPresent)
+            #expect(backend.freshInfoCalls == 0)
+        }
+    }
+
+    /// No daemon registered, though the status is `.error`: nothing holds for this app, and
+    /// no release is sent to a daemon that cannot answer.
+    @Test func releaseWithAnUnregisteredDaemonInErrorNeedsNoCall() async {
+        let backend = FakeBackend()
+        backend.stubStatus = .error("re-registering failed")
+        backend.daemonMayRunOverride = false
+        let svc = LidSleepService(backend: backend)
+        svc.setWanted(false)
+        var confirmed: Bool?
+        svc.confirmReleased { confirmed = $0 }
+        await until { confirmed != nil }
+        #expect(confirmed == true)
+        #expect(svc.hold == LidHold())
+        #expect(backend.setCalls.isEmpty)
+    }
+
     /// A running daemon must answer afresh that it owns nothing; no answer is a refusal.
     @Test func removalConfirmWithRunningDaemonNeedsFreshInfo() async {
         for status in [HelperStatus.installed, .checking, .error("x")] {
