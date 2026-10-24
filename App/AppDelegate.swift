@@ -23,7 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         if let dir = args["SnapshotDir"] as? String {
             SnapshotExporter.export(to: dir)
-            NSApp.terminate(nil)
+            Task {
+                await SnapshotExporter.exportWindows(to: dir)
+                NSApp.terminate(nil)
+            }
             return
         }
         #endif

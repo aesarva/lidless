@@ -4,7 +4,7 @@ import LidlessCore
 import SwiftUI
 
 /// Debug aid: `-SnapshotDir <path>` renders every popover state (each update row among them),
-/// each settings tab and the menu-bar glyphs to PNGs in light and dark, without Screen Recording
+/// each settings tab (and the real window per tab) and the menu-bar glyphs to PNGs in light and dark, without Screen Recording
 /// access, then quits. The language is the launch's own (`-AppleLanguages "(ru)"`).
 @MainActor
 enum SnapshotExporter {
@@ -33,11 +33,11 @@ enum SnapshotExporter {
                     ("helper-legacy-error", .helper, legacyFailed, .idle),
                     ("about", .about, installed(), .idle),
                 ] {
-                    let nav = SettingsNavigation()
-                    nav.tab = tab
-                    let view = SettingsView(controller: previewController(readings: previewReadings()),
-                                            helper: helper, loginItem: LoginItem(),
-                                            updates: PreviewUpdates(updates), navigation: nav)
+                    let view = tab
+                        .content(controller: previewController(readings: previewReadings()), helper: helper,
+                                 loginItem: LoginItem(), updates: PreviewUpdates(updates))
+                        .fittedForm()
+                        .frame(width: 420)
                         .background(Color(nsColor: .windowBackgroundColor))
                     snapshot(view, appearance: appearance,
                              to: dir.appendingPathComponent("settings-\(name)-\(suffix).png"))
@@ -47,6 +47,19 @@ enum SnapshotExporter {
                 snapshot(menuBarStrip(updateAvailable: true), appearance: appearance,
                          to: dir.appendingPathComponent("menubar-update-\(suffix).png"))
             }
+        }
+    }
+
+    /// The real settings window per tab, toolbar included, in light and dark. Windows need the run
+    /// loop to lay out, so this is async and runs after `export`.
+    static func exportWindows(to directory: String) async {
+        let dir = URL(fileURLWithPath: directory, isDirectory: true)
+        let controller = SettingsWindowController(
+            controller: previewController(readings: previewReadings()),
+            helper: HelperModel(backend: PreviewBackend(.installed)), updates: PreviewUpdates(.upToDate))
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            await controller.exportSnapshots(to: dir, appearance: appearance,
+                                             suffix: appearance == .aqua ? "light" : "dark")
         }
     }
 

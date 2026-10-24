@@ -1,7 +1,7 @@
 import SwiftUI
 import LidlessCore
 
-enum SettingsTab { case general, safety, helper, about }
+enum SettingsTab: CaseIterable { case general, safety, helper, about }
 
 /// The studio panel under the menu-bar icon.
 struct PopoverView: View {
