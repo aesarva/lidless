@@ -166,6 +166,40 @@ struct SessionControllerSafetyTests {
         #expect(c.session?.lidModeActive == true)
     }
 
+    /// What the lid switch shows in a session: lid mode wanted, held or not. Waiting for the
+    /// helper (here while the daemon is checked) counts, so the switch can turn it off.
+    @Test func lidModeWaitingForTheHelperIsWanted() {
+        #expect(!c.lidModeWanted)
+        lid.status = .checking
+        startWithLid()
+        #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModePending == false)
+        #expect(c.lidModeWanted)
+        #expect(lid.wanted == [true])
+        c.setLidMode(false)
+        #expect(!c.lidModeWanted)
+        #expect(lid.wanted == [true, false])
+    }
+
+    /// A safety pause is off on the switch (a tap turns lid mode on again); so is lid mode
+    /// during a helper removal, and with no session.
+    @Test func lidModePausedOrBeingRemovedIsNotWanted() {
+        startWithLid()
+        #expect(c.lidModeWanted)
+        c.update(readings: readings(thermal: .serious))
+        #expect(!c.lidModeWanted)
+        #expect(c.settings.lidModeEnabled)
+        c.update(readings: readings())
+        c.setLidMode(true)
+        #expect(c.lidModeWanted)
+        lid.holdConfirm = true
+        c.beginHelperRemoval { _, _ in }
+        #expect(!c.lidModeWanted)
+        c.endHelperRemoval()
+        c.stop(.user)
+        #expect(!c.lidModeWanted)
+    }
+
     @Test func userReenableClearsSuspensionAndResetsLimit() {
         startWithLid()
         let since = t0

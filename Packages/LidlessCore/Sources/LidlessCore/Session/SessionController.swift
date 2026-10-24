@@ -46,6 +46,14 @@ import os
         return nil
     }
 
+    /// Closed-lid mode this session wants: held, on its way, or waiting for the helper (a
+    /// safety pause is not wanted). False with no session and during a helper removal. What
+    /// the helper service is asked for (`syncLidWanted`), and what the lid switch shows.
+    public var lidModeWanted: Bool {
+        guard let s = session, settings.lidModeEnabled, !helperRemovalInProgress else { return false }
+        return s.lidModeSuspendedReason == nil || s.lidModeSuspendedReason == .helperUnavailable
+    }
+
     public init(assertions: SleepAssertionService, lid: LidSleepControlling, notifier: Notifier,
                 settingsStore: SettingsStore, clock: WakeClock,
                 display: DisplayControlling = NoDisplayControl()) {
@@ -406,10 +414,7 @@ import os
     /// releases the hold in the background. Returns whether the wish changed.
     @discardableResult
     private func syncLidWanted() -> Bool {
-        var wanted = false
-        if let s = session, settings.lidModeEnabled, !helperRemovalInProgress {
-            wanted = s.lidModeSuspendedReason == nil || s.lidModeSuspendedReason == .helperUnavailable
-        }
+        let wanted = lidModeWanted
         guard wanted != lidWanted else { return false }
         lidWanted = wanted
         // An answer about the previous wish is never delivered.
