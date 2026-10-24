@@ -82,7 +82,7 @@ generate_keys --account lidless
 generate_keys --account lidless -x lidless-sparkle-key.backup
 ```
 
-Keep the backup: without the key you can't sign further updates. A lost EdDSA key can be rotated through Sparkle's [key rotation](https://sparkle-project.github.io/documentation/#rotating-signing-keys) as long as the Developer ID identity stays the same, but that is a detour worth avoiding. `scripts/release.sh` refuses a signed release while `Info.plist` still holds the placeholder.
+Keep the backup: without the key you can't sign further updates. A lost EdDSA key can be rotated through Sparkle's [key rotation](https://sparkle-project.github.io/documentation/#rotating-signing-keys) as long as the Developer ID identity stays the same, but that is a detour worth avoiding. `scripts/release.sh` refuses a signed release while `Info.plist` still holds the placeholder, and before notarizing checks that the built app's `SUPublicEDKey` is the key the feed will be signed with (`generate_keys --account lidless -p`): a wrong key would leave every installed copy unable to take any update.
 
 1. On `develop`: update `CHANGELOG.md`, the version in `project.yml` (`MARKETING_VERSION`, set once at the top for both the app and the helper) and the `VERSION` default in the `Makefile`.
 2. Build, sign, notarize and staple the app and the DMG, and check Gatekeeper:
@@ -91,7 +91,7 @@ Keep the backup: without the key you can't sign further updates. A lost EdDSA ke
    scripts/release.sh 0.4.0      # --unsigned checks everything except signing, notarization and the feed
    ```
 
-   For a signed release it also verifies that the app, the helper and `Sparkle.framework` carry Team ID `6H45P75YYV` and that `spctl` accepts the app and the DMG, then writes `dist/appcast.xml` (signed with the `lidless` key, checked with `xmllint`). Without those checks it builds no feed.
+   For a signed release it also verifies that the app, the helper and `Sparkle.framework` carry Team ID `6H45P75YYV` and that `spctl` accepts the app and the DMG, then writes `dist/appcast.xml` (signed with the `lidless` key, with the built app's `CFBundleVersion` as the feed's build number, checked with `xmllint`). Without those checks it builds no feed.
 3. Run the hardware checklist below on the signed build.
 4. Merge, tag and publish:
 

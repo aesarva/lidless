@@ -50,6 +50,35 @@ VERSION="$VERSION" SIGN_IDENTITY="$SIGN_IDENTITY" scripts/build-app.sh
 APP=build/Lidless.app
 
 if ! $UNSIGNED; then
+    # Ключ в собранном приложении должен быть тем, которым подписывается лента: с другим ни одна
+    # установленная копия не примет ни одного обновления, а 0.4.0 — первая версия с обновлятелем.
+    # Проверяем до нотаризации, чтобы не ждать её зря. generate_keys -p только печатает публичный ключ.
+    echo "==> Проверка ключа обновлений"
+    SIGN_UPDATE="${SIGN_UPDATE:-$(find build/DerivedData/SourcePackages/artifacts -type f \
+        -path '*/Sparkle/bin/sign_update' -not -path '*/old_dsa_scripts/*' 2>/dev/null | head -1 || true)}"
+    # Тот же sign_update подпишет ленту в make-appcast.sh.
+    export SIGN_UPDATE
+    GENERATE_KEYS="$(dirname "${SIGN_UPDATE:-.}")/generate_keys"
+    if [ -z "$SIGN_UPDATE" ] || [ ! -x "$GENERATE_KEYS" ]; then
+        echo "Нет generate_keys рядом с sign_update в артефактах Sparkle ($GENERATE_KEYS)." >&2
+        exit 1
+    fi
+    FEED_KEY="$("$GENERATE_KEYS" --account lidless -p || true)"
+    APP_KEY="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP/Contents/Info.plist" 2>/dev/null || true)"
+    if [ -z "$FEED_KEY" ]; then
+        echo "generate_keys --account lidless -p не вернул ключ: в связке ключей нет ключа ленты." >&2
+        exit 1
+    fi
+    if [ -z "$APP_KEY" ]; then
+        echo "В $APP/Contents/Info.plist нет SUPublicEDKey." >&2
+        exit 1
+    fi
+    if [ "$FEED_KEY" != "$APP_KEY" ]; then
+        echo "SUPublicEDKey в приложении ($APP_KEY) не совпадает с ключом ленты ($FEED_KEY)." >&2
+        echo "Впишите в App/Resources/Info.plist вывод generate_keys --account lidless -p и соберите заново." >&2
+        exit 1
+    fi
+
     # Приложение нотаризуем отдельно, чтобы скрепить билет с ним самим: тогда оно
     # открывается без сети, даже если пользователь скопирует его куда-то из DMG.
     ZIP="$(mktemp -d)/Lidless.zip"
@@ -89,7 +118,8 @@ if ! $UNSIGNED; then
         fi
     done
     echo "==> Лента обновлений"
-    BUILD_NUMBER="$(git rev-list --count HEAD)"
+    # Номер из самого приложения: Sparkle сравнивает с ним CFBundleVersion установленной копии.
+    BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
     scripts/make-appcast.sh "$DMG" "$VERSION" "$BUILD_NUMBER" > dist/appcast.xml \
         || { rm -f dist/appcast.xml; exit 1; }
     xmllint --noout dist/appcast.xml
