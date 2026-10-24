@@ -63,29 +63,56 @@ import os
 
     @discardableResult
     public func start(_ duration: SessionDuration) -> Bool {
-        guard case .off = state else { return false }
         let now = clock.now
-        if let r = readings, !SafetyPolicy.canStart(r, settings: settings.safety) {
-            startBlock = .lowBattery(threshold: settings.safety.batteryThreshold)
-            return false
-        }
-        do {
-            try assertions.acquire(keepDisplayOn: settings.keepDisplayOn)
-        } catch {
-            log.error("acquire failed: \(String(describing: error), privacy: .public)")
-            notifier.post(.assertionFailed(String(describing: error)))
-            return false
-        }
-        let endsAt = duration.endDate(from: now)
-        state = .active(Session(
-            startedAt: now,
-            endsAt: endsAt,
-            keepDisplayOn: settings.keepDisplayOn,
-            endingSoonNotified: Self.isWithinWarning(endsAt, now: now)
-        ))
-        startBlock = nil
+        guard begin(startedAt: now, endsAt: duration.endDate(from: now),
+                    keepDisplayOn: settings.keepDisplayOn) else { return false }
         if settings.lidModeEnabled { enableLidMode() }
         return true
+    }
+
+    /// The session on air, for the copy that starts after an update (nil: none is running).
+    public func snapshot(now: Date) -> ResumeSnapshot? {
+        session.map { ResumeSnapshot(session: $0, savedAt: now) }
+    }
+
+    /// Starts the session the previous copy saved before an update relaunched it, like `start`
+    /// (low battery stops it). Lid mode a safety rule suspended stays suspended for that reason,
+    /// until the user turns it on again. Lid mode that was on, on its way or waiting for the
+    /// helper waits for the helper again, keeping its original start time: it is wanted only
+    /// once the safety rules have judged it on readings taken by this copy (now if there are
+    /// some, else at the next ones). Otherwise lid mode is off.
+    @discardableResult
+    public func resume(_ s: ResumeSnapshot) -> Bool {
+        guard begin(startedAt: s.startedAt, endsAt: s.endsAt, keepDisplayOn: s.keepDisplayOn) else {
+            return false
+        }
+        guard settings.lidModeEnabled else { return true }
+        if let reason = s.lidModeSuspendedReason, reason != .helperUnavailable {
+            mutateSession {
+                $0.lidModeEnabledAt = s.lidModeEnabledAt
+                $0.lidModeSuspendedReason = reason
+            }
+        } else if s.lidModeActive || s.lidModeSuspendedReason == .helperUnavailable {
+            // Not wanted yet (no `syncLidWanted`): the check below, or the next readings, comes first.
+            mutateSession {
+                $0.lidModeEnabledAt = s.lidModeEnabledAt
+                $0.lidModeSuspendedReason = .helperUnavailable
+            }
+            if readings != nil {
+                suspendBlockedLidWish()
+                retryHelperSuspendedLidMode()
+                syncLidWanted()
+            }
+        }
+        return true
+    }
+
+    /// Call once at launch, after the first safety readings have arrived: resumes the session
+    /// saved before an update relaunch if it is still usable, else starts one if the setting
+    /// says so.
+    public func launch(resuming snapshot: ResumeSnapshot?) {
+        if let s = snapshot?.usable(now: clock.now), resume(s) { return }
+        startOnLaunchIfEnabled()
     }
 
     /// Lid mode is released in the background: a release that fails leaves a reset pending.
@@ -309,6 +336,30 @@ import os
     }
 
     // MARK: - Private
+
+    /// What `start` and `resume` share: the low-battery rule, then the assertions.
+    private func begin(startedAt: Date, endsAt: Date?, keepDisplayOn: Bool) -> Bool {
+        guard case .off = state else { return false }
+        if let r = readings, !SafetyPolicy.canStart(r, settings: settings.safety) {
+            startBlock = .lowBattery(threshold: settings.safety.batteryThreshold)
+            return false
+        }
+        do {
+            try assertions.acquire(keepDisplayOn: keepDisplayOn)
+        } catch {
+            log.error("acquire failed: \(String(describing: error), privacy: .public)")
+            notifier.post(.assertionFailed(String(describing: error)))
+            return false
+        }
+        state = .active(Session(
+            startedAt: startedAt,
+            endsAt: endsAt,
+            keepDisplayOn: keepDisplayOn,
+            endingSoonNotified: Self.isWithinWarning(endsAt, now: clock.now)
+        ))
+        startBlock = nil
+        return true
+    }
 
     /// Lid closed in lid mode: the Mac keeps running but the screen goes dark (unless an
     /// external display is in use). Lid opened: the display choice applies again.

@@ -51,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let clock = SystemClock()
         lidControl = lid
         var settingsStore: SettingsStore = UserDefaultsSettingsStore()
+        var resumeStore: ResumeStore? = UserDefaultsResumeStore()
         #if DEBUG
         // Design-review runs never turn closed-lid mode on through the real helper or touch the
         // user's settings: another Lidless may be running with lid mode on.
@@ -59,8 +60,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let store = PreviewStore()
             store.settings.lidModeEnabled = true
             settingsStore = store
+            resumeStore = nil
         }
         #endif
+        // The session the previous copy saved before an update relaunched it: read and removed
+        // once, before any session can start.
+        let resumeSnapshot = resumeStore?.take()
         let controller = SessionController(
             assertions: IOPMSleepAssertionService(),
             lid: lidControl,
@@ -86,7 +91,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             offerLifetime: offerLifetime ?? .seconds(24 * 60 * 60),
             onShowPanel: { [weak self] in self?.statusItem?.openPanel() },
             lidIsOpen: { [weak controller] in !(controller?.readings?.lidClosed ?? false) },
-            onWillRelaunch: {}
+            // Only the session on air is saved; quitting then ends it as usual (the snapshot
+            // brings it back in the new copy).
+            onWillRelaunch: { [weak controller] in
+                if let s = controller?.snapshot(now: clock.now) { resumeStore?.save(s) }
+            }
         )
         self.updates = updates
 
@@ -118,10 +127,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openSettings: { [weak self] tab in self?.settingsWindow.show(tab: tab) }
         )
         // Order matters: take the first readings (engine.start() refreshes immediately), then
-        // start-on-launch sees them. The daemon undoes a leftover hold and removes a 0.2.0
-        // helper itself when it starts, before any client can connect.
+        // the resumed session or start-on-launch sees them. The daemon undoes a leftover hold
+        // and removes a 0.2.0 helper itself when it starts, before any client can connect.
         engine.start()
-        controller.startOnLaunchIfEnabled()
+        controller.launch(resuming: resumeSnapshot)
         statusItem.refresh()
         // Checks the daemon's version and build once at launch.
         helper.refresh()
