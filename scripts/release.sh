@@ -15,6 +15,9 @@ UNSIGNED=false
 [ "${2:-}" = "--unsigned" ] && UNSIGNED=true
 NOTARY_PROFILE="${NOTARY_PROFILE:-Lidless}"
 
+# Лента от прошлого запуска не должна пережить новую сборку той же версии, даже если эта упадёт.
+rm -f dist/appcast.xml
+
 if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode.app ]; then
     export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 fi
@@ -57,8 +60,6 @@ if ! $UNSIGNED; then
 fi
 
 mkdir -p dist
-# Лента от прошлого запуска не должна пережить новую сборку той же версии.
-rm -f dist/appcast.xml
 DMG="dist/Lidless-$VERSION.dmg"
 STAGING="$(mktemp -d)"
 cp -R "$APP" "$STAGING/"
