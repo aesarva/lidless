@@ -8,6 +8,9 @@ import LidlessCore
     @ObservationIgnored private let coordinator: HelperCoordinator
     private(set) var status: HelperStatus
     private(set) var isWorking = false
+    /// Set for a whole helper removal (the release check, the backend call and the restore),
+    /// so `isWorking` covers it all and not just the backend call.
+    @ObservationIgnored private var removing = false
     /// The 0.2.0 sudoers helper was there earlier in this launch and is gone now.
     private(set) var legacyRemoved = false
     /// Why removing the 0.2.0 helper failed (the daemon retries when it next starts).
@@ -55,13 +58,24 @@ import LidlessCore
         await run { try $0.uninstall() }
     }
 
+    /// Brackets a helper removal: the buttons stay disabled from the release check to the end.
+    func beginRemoval() {
+        removing = true
+        isWorking = true
+    }
+
+    func endRemoval() {
+        removing = false
+        isWorking = false
+    }
+
     func openSystemSettings() {
         backend.openSystemSettings()
     }
 
     private func run(_ work: @escaping @Sendable (PrivilegedBackend) throws -> Void) async -> HelperError? {
         isWorking = true
-        defer { isWorking = false }
+        defer { if !removing { isWorking = false } }
         let backend = self.backend
         let result: HelperError? = await Task.detached {
             do {

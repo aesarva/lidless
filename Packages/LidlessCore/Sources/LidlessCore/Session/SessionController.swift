@@ -26,6 +26,8 @@ import os
     @ObservationIgnored private var lidWanted = false
     /// A `confirmReleased` is on its way for the current wish.
     @ObservationIgnored private var confirmInFlight = false
+    /// Between `beginHelperRemoval` and `endHelperRemoval`: lid mode is not wanted.
+    @ObservationIgnored private var helperRemovalInProgress = false
     /// Lid state from the previous readings, so lid close/open is handled once per edge.
     @ObservationIgnored private var lastLidClosed = false
     /// True while the lid is closed in lid mode and the screen was turned off for it.
@@ -164,23 +166,44 @@ import os
         }
     }
 
-    /// Turns lid mode off before the helper is removed (while the helper can still do it) and
-    /// returns what to bring back if the removal fails.
-    public func beginHelperRemoval() -> LidModeRestorePoint {
+    /// Turns lid mode off before the helper is removed (while the helper can still do it),
+    /// then asks the daemon with a fresh answer whether it still owns disablesleep: `done`
+    /// gets what to bring back if the removal fails, and whether the helper may be removed
+    /// (a hold of this app's own being gone is no proof). Until `endHelperRemoval()` lid mode
+    /// is not wanted, so it cannot be taken again meanwhile. Ignored (`done` is not called)
+    /// while a removal is already running.
+    public func beginHelperRemoval(_ done: @escaping @MainActor (LidModeRestorePoint, Bool) -> Void) {
+        guard !helperRemovalInProgress else { return }
         let point = LidModeRestorePoint(
             sessionID: session?.id,
             lidModeEnabled: settings.lidModeEnabled,
             wasActive: session?.lidModeActive ?? false,
+            wasPending: session?.lidModePending ?? false,
             suspendedReason: session?.lidModeSuspendedReason
         )
+        helperRemovalInProgress = true
         setLidMode(false)
-        return point
+        // Queued after the release; always answered, as the wish cannot change until the end.
+        lid.confirmReleased { [weak self] released in
+            if released { self?.releaseConfirmed() }
+            done(point, released)
+        }
+    }
+
+    /// Call when the removal is over (after the helper was removed, or after
+    /// `restoreAfterFailedRemoval`): lid mode can be wanted again. Restored lid mode is judged
+    /// by the safety rules on the latest readings first, as on a poll.
+    public func endHelperRemoval() {
+        guard helperRemovalInProgress else { return }
+        helperRemovalInProgress = false
+        suspendBlockedLidWish()
+        syncLidWanted()
     }
 
     /// The helper removal failed: the setting comes back, a safety suspension comes back as
-    /// it was, and lid mode that was on (or waiting for the helper) is left to the
-    /// safety-checked retry, which keeps its original start time. Nothing is wanted here:
-    /// the next readings decide.
+    /// it was, and lid mode that was on, on its way or waiting for the helper waits for the
+    /// helper again, keeping its original start time. It is wanted again at
+    /// `endHelperRemoval()`, after the safety check.
     /// Only the setting comes back for another session, or when a safety rule suspended lid
     /// mode meanwhile: that suspension stays until the user turns lid mode on again.
     public func restoreAfterFailedRemoval(_ point: LidModeRestorePoint) {
@@ -190,7 +213,7 @@ import os
         if let current = s.lidModeSuspendedReason, current != .helperUnavailable { return }
         if let reason = point.suspendedReason, reason != .helperUnavailable {
             mutateSession { $0.lidModeSuspendedReason = reason }
-        } else if point.wasActive || point.suspendedReason == .helperUnavailable {
+        } else if point.wasActive || point.wasPending || point.suspendedReason == .helperUnavailable {
             mutateSession { $0.lidModeSuspendedReason = .helperUnavailable }
         }
     }
@@ -320,13 +343,13 @@ import os
     }
 
     /// The only place the wish is set: closed-lid mode is wanted while a session runs with
-    /// the setting on and no safety rule suspended it (waiting for the helper still wants it).
-    /// Unwanted, it is off at once; the helper service releases the hold in the background.
-    /// Returns whether the wish changed.
+    /// the setting on, no safety rule suspended it (waiting for the helper still wants it) and
+    /// the helper is not being removed. Unwanted, it is off at once; the helper service
+    /// releases the hold in the background. Returns whether the wish changed.
     @discardableResult
     private func syncLidWanted() -> Bool {
         var wanted = false
-        if let s = session, settings.lidModeEnabled {
+        if let s = session, settings.lidModeEnabled, !helperRemovalInProgress {
             wanted = s.lidModeSuspendedReason == nil || s.lidModeSuspendedReason == .helperUnavailable
         }
         guard wanted != lidWanted else { return false }
@@ -406,13 +429,18 @@ import os
         lid.confirmReleased { [weak self] released in
             guard let self else { return }
             confirmInFlight = false
-            guard released, !lidWanted else { return }
-            recoveryPending = false
-            // A safety suspension that still holds shows again.
-            if attention == .helperUnavailable {
-                let reason = session?.lidModeSuspendedReason
-                attention = reason == .helperUnavailable ? nil : reason
-            }
+            if released { releaseConfirmed() }
+        }
+    }
+
+    /// The daemon answered afresh that it owns nothing: a pending reset is done.
+    private func releaseConfirmed() {
+        guard recoveryPending, !lidWanted else { return }
+        recoveryPending = false
+        // A safety suspension that still holds shows again.
+        if attention == .helperUnavailable {
+            let reason = session?.lidModeSuspendedReason
+            attention = reason == .helperUnavailable ? nil : reason
         }
     }
 

@@ -58,5 +58,7 @@ public struct LidModeRestorePoint: Equatable, Sendable {
     public let sessionID: UUID?
     public let lidModeEnabled: Bool
     public let wasActive: Bool
+    /// The hold was on its way (wanted, not confirmed yet).
+    public let wasPending: Bool
     public let suspendedReason: SafetyReason?
 }

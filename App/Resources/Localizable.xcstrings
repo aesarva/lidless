@@ -234,6 +234,16 @@
         }
       }
     },
+    "Couldn't restore normal sleep — the helper was not removed.": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось вернуть обычный сон — помощник не удалён."
+          }
+        }
+      }
+    },
     "Default duration": {
       "localizations": {
         "ru": {

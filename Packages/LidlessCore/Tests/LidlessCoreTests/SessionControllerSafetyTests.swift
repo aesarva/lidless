@@ -626,14 +626,22 @@ struct SessionControllerSafetyTests {
         #expect(c.session?.lidModeActive == true)
     }
 
+    /// Begins a helper removal and returns its restore point (`FakeLid` answers at once).
+    func beginRemoval() -> LidModeRestorePoint {
+        var point: LidModeRestorePoint?
+        c.beginHelperRemoval { p, _ in point = p }
+        return point!
+    }
+
     /// A failed helper removal keeps a safety suspension as it was and acquires nothing.
     @Test func failedRemovalKeepsSafetySuspension() {
         startWithLid()
         c.update(readings: readings(thermal: .serious))
         #expect(c.session?.lidModeSuspendedReason == .thermal)
-        let point = c.beginHelperRemoval()
+        let point = beginRemoval()
         #expect(c.settings.lidModeEnabled == false)
         c.restoreAfterFailedRemoval(point)
+        c.endHelperRemoval()
         #expect(c.settings.lidModeEnabled == true)
         #expect(store.stored.lidModeEnabled == true)
         #expect(c.session?.lidModeActive == false)
@@ -646,7 +654,7 @@ struct SessionControllerSafetyTests {
     @Test func restoreKeepsANewerSafetySuspension() {
         startWithLid()
         let point = LidModeRestorePoint(sessionID: c.session?.id, lidModeEnabled: true,
-                                        wasActive: true, suspendedReason: nil)
+                                        wasActive: true, wasPending: false, suspendedReason: nil)
         c.update(readings: readings(thermal: .serious))
         #expect(c.session?.lidModeSuspendedReason == .thermal)
         c.restoreAfterFailedRemoval(point)
@@ -657,37 +665,45 @@ struct SessionControllerSafetyTests {
         #expect(c.session?.lidModeSuspendedReason == .thermal)
     }
 
-    /// Lid mode that was on comes back through the safety-checked retry, keeping its start.
+    /// Lid mode that was on comes back when the removal ends (not on a poll before), keeping
+    /// its start.
     @Test func failedRemovalReenablesActiveLidMode() {
         startWithLid()
         clock.advance(600)
-        let point = c.beginHelperRemoval()
+        let point = beginRemoval()
         #expect(lid.wanted == [true, false])
         #expect(c.session?.lidModeActive == false)
         c.restoreAfterFailedRemoval(point)
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
         #expect(c.attention == nil)
         #expect(notifier.posted.isEmpty)
-        #expect(lid.acquireCalls == 1)
         c.update(readings: readings())
+        #expect(lid.acquireCalls == 1)
+        c.endHelperRemoval()
         #expect(lid.acquireCalls == 2)
         #expect(c.session?.lidModeActive == true)
         #expect(c.session?.lidModeEnabledAt == t0)
     }
 
-    /// Lid mode is off at once even when the release during the removal fails; restored, it
-    /// comes back only through the safety-checked retry, which turns a hot Mac into a thermal
-    /// suspension that stays.
+    /// Lid mode is off at once even when the release during the removal fails, and the
+    /// removal stops; restored, lid mode comes back only through the safety check, which
+    /// turns a hot Mac into a thermal suspension that stays.
     @Test func failedRemovalKeepsANewerSafetySuspension() {
         startWithLid()
         lid.failDisable = true
-        let point = c.beginHelperRemoval()
+        lid.confirmResult = false
+        var results: [Bool] = []
+        c.beginHelperRemoval { point, ok in
+            results.append(ok)
+            c.restoreAfterFailedRemoval(point)
+        }
+        #expect(results == [false])
         #expect(c.session?.lidModeActive == false)
         lid.failDisable = false
-        c.restoreAfterFailedRemoval(point)
         #expect(c.settings.lidModeEnabled == true)
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
         c.update(readings: readings(thermal: .serious))
+        c.endHelperRemoval()
         #expect(c.session?.lidModeSuspendedReason == .thermal)
         c.update(readings: readings())
         #expect(lid.acquireCalls == 1)
@@ -695,11 +711,24 @@ struct SessionControllerSafetyTests {
         #expect(c.session?.lidModeSuspendedReason == .thermal)
     }
 
+    /// The safety check at the end uses the latest readings even when none came after the
+    /// restore.
+    @Test func endOfRemovalChecksSafetyBeforeWanting() {
+        startWithLid()
+        let point = beginRemoval()
+        c.update(readings: readings(thermal: .serious))
+        c.restoreAfterFailedRemoval(point)
+        c.endHelperRemoval()
+        #expect(lid.wanted == [true, false])
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        #expect(lid.acquireCalls == 1)
+    }
+
     /// A restore point from an earlier session only brings back the setting; the running
-    /// session follows it from the next readings, with a new battery-limit interval.
+    /// session follows it when the removal ends, with a new battery-limit interval.
     @Test func failedRemovalIgnoresAnotherSession() {
         startWithLid()
-        let point = c.beginHelperRemoval()
+        let point = beginRemoval()
         c.stop(.user)
         clock.advance(60)
         c.start(.indefinite)
@@ -707,7 +736,7 @@ struct SessionControllerSafetyTests {
         #expect(c.settings.lidModeEnabled == true)
         #expect(c.session?.lidModeSuspendedReason == nil)
         #expect(lid.acquireCalls == 1)
-        c.update(readings: readings())
+        c.endHelperRemoval()
         #expect(lid.acquireCalls == 2)
         #expect(c.session?.lidModeEnabledAt == clock.now)
     }
@@ -715,13 +744,13 @@ struct SessionControllerSafetyTests {
     /// Choosing another duration during the removal is the same session: lid mode comes back.
     @Test func failedRemovalSurvivesARestart() {
         startWithLid()
-        let point = c.beginHelperRemoval()
+        let point = beginRemoval()
         clock.advance(600)
         c.restart(.minutes(60))
         #expect(c.session?.startedAt != t0)
         c.restoreAfterFailedRemoval(point)
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
-        c.update(readings: readings())
+        c.endHelperRemoval()
         #expect(lid.acquireCalls == 2)
         #expect(c.session?.lidModeActive == true)
         #expect(c.session?.lidModeEnabledAt == t0)
@@ -729,8 +758,9 @@ struct SessionControllerSafetyTests {
 
     @Test func failedRemovalWithLidModeOffStaysOff() {
         c.start(.indefinite)
-        let point = c.beginHelperRemoval()
+        let point = beginRemoval()
         c.restoreAfterFailedRemoval(point)
+        c.endHelperRemoval()
         #expect(c.settings.lidModeEnabled == false)
         #expect(c.session?.lidModeSuspendedReason == nil)
         c.update(readings: readings())
