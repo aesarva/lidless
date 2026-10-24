@@ -129,10 +129,13 @@ private final class Harness: NSObject, NSXPCListenerDelegate, @unchecked Sendabl
         return true
     }
 
-    func makeClient(timeout: TimeInterval = 2) -> XPCHelperClient {
+    /// `requirement`: the code-signing requirement the client sets on its connections.
+    func makeClient(timeout: TimeInterval = 2, requirement: String? = nil) -> XPCHelperClient {
         XPCHelperClient(timeout: timeout) { [self] in
             lock.withLock { made += 1 }
-            return NSXPCConnection(listenerEndpoint: listener.endpoint)
+            let c = NSXPCConnection(listenerEndpoint: listener.endpoint)
+            if let requirement { c.setCodeSigningRequirement(requirement) }
+            return c
         }
     }
 }
@@ -176,6 +179,18 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         let info = try client.info()
         #expect(info.build == "7")
         #expect(!info.owned)
+    }
+
+    /// A daemon whose bundle was replaced while it runs (an update) no longer satisfies the
+    /// client's code-signing requirement. Re-registration starts the new one: `.rejected`.
+    @Test func daemonFailingTheSignatureRequirementIsRejected() {
+        let client = Harness().makeClient(requirement: #"identifier "io.github.aesarva.Lidless.nobody""#)
+        #expect {
+            try client.info()
+        } throws: { error in
+            if case .rejected = error as? HelperError { return true }
+            return false
+        }
     }
 
     @Test func replyComesBackAsHelperInfo() throws {

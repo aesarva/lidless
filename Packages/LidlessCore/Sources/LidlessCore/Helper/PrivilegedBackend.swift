@@ -21,7 +21,8 @@ public enum HelperError: Error, Equatable {
     case installFailed(String)
     /// The connection dropped with the call unanswered: the daemon refused this app's
     /// signature, could not decode the call (a daemon from another build), is not reachable
-    /// or exited mid-call.
+    /// or exited mid-call; or the daemon failed this app's code-signing requirement (it runs
+    /// from a bundle replaced since it started).
     case rejected(String)
     /// No reply within the client's timeout.
     case timedOut

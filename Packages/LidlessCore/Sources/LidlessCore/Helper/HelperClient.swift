@@ -16,7 +16,8 @@ public struct HelperInfo: Equatable, Sendable {
 }
 
 /// Synchronous calls to the privileged daemon. Errors are `HelperError.rejected` when the
-/// daemon dropped the connection unanswered, `HelperError.timedOut` when no reply came in
+/// daemon dropped the connection unanswered or failed the code-signing requirement,
+/// `HelperError.timedOut` when no reply came in
 /// time, otherwise `HelperError.commandFailed` (the daemon answered with an error).
 /// Connections are numbered (generations, increasing from 1): the daemon ties a hold to the
 /// connection that took it and releases it when that connection closes.
@@ -157,9 +158,12 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
             let proxy = c.synchronousRemoteObjectProxyWithErrorHandler { error in
                 // Interrupted or invalid with the call unanswered: a daemon from another build
                 // that cannot decode it cancels the connection, which arrives as either.
+                // A signature failure: the daemon runs from a bundle replaced since it started
+                // (an update), so it no longer passes the requirement. Re-registration fixes both.
                 let nsError = error as NSError
                 let rejected = nsError.domain == NSCocoaErrorDomain
-                    && [NSXPCConnectionInterrupted, NSXPCConnectionInvalid].contains(nsError.code)
+                    && [NSXPCConnectionInterrupted, NSXPCConnectionInvalid,
+                        NSXPCConnectionCodeSigningRequirementFailure].contains(nsError.code)
                 let message = error.localizedDescription
                 finish(.failure(rejected ? .rejected(message) : .commandFailed(message)))
             }
