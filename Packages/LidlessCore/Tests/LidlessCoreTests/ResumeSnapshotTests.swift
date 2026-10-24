@@ -46,6 +46,17 @@ import Testing
         #expect(store.take() == nil)
     }
 
+    /// Обновление сорвалось после сохранения: снимок не должен дожить до следующего запуска.
+    @Test func discardDropsTheSnapshot() {
+        let defaults = UserDefaults(suiteName: "ResumeSnapshotTests.\(UUID())")!
+        let store = UserDefaultsResumeStore(defaults: defaults)
+        store.save(snapshot())
+        store.discard()
+        #expect(store.take() == nil)
+        store.discard()
+        #expect(store.take() == nil)
+    }
+
     @Test func roundTripsSuspension() throws {
         var session = Session(startedAt: t0, lidModeActive: false, lidModeEnabledAt: t0)
         session.lidModeSuspendedReason = .thermal

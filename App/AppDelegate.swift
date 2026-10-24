@@ -97,7 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // brings it back in the new copy).
             onWillRelaunch: { [weak controller] in
                 if let s = controller?.snapshot(now: clock.now) { resumeStore?.save(s) }
-            }
+            },
+            // The relaunch did not happen: this copy keeps the session on air itself.
+            onRelaunchAbandoned: { resumeStore?.discard() }
         )
         self.updates = updates
 

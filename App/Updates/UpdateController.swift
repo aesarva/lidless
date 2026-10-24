@@ -19,6 +19,10 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
     @ObservationIgnored private var model = UpdateModel()
     @ObservationIgnored private let feedOverride: String?
     @ObservationIgnored private let onWillRelaunch: @MainActor () -> Void
+    @ObservationIgnored private let onRelaunchAbandoned: @MainActor () -> Void
+    /// `onWillRelaunch` ran and this copy is still here: an update session that now ends without
+    /// the relaunch calls `onRelaunchAbandoned`.
+    @ObservationIgnored private var relaunchAnnounced = false
     @ObservationIgnored private var driver: PanelUserDriver!
     @ObservationIgnored private var updater: SPUUpdater!
     @ObservationIgnored private var canCheckObservation: NSKeyValueObservation?
@@ -29,12 +33,15 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
     /// `feedOverride`: a feed instead of `SUFeedURL` (launch argument `-UpdateFeedURL`);
     /// `offerLifetime`: how long an offer stays up uninstalled (launch argument
     /// `-UpdateOfferLifetime <seconds>`, any build); `lidIsOpen`: whether installing (and so quitting) is safe
-    /// now; `onWillRelaunch`: Sparkle is about to quit this copy for the new one.
+    /// now; `onWillRelaunch`: Sparkle is about to quit this copy for the new one;
+    /// `onRelaunchAbandoned`: after that, the install failed or was dismissed and this copy runs on.
     init(feedOverride: String?, offerLifetime: Duration = .seconds(24 * 60 * 60),
          onShowPanel: @escaping () -> Void, lidIsOpen: @escaping @MainActor () -> Bool,
-         onWillRelaunch: @escaping @MainActor () -> Void) {
+         onWillRelaunch: @escaping @MainActor () -> Void,
+         onRelaunchAbandoned: @escaping @MainActor () -> Void) {
         self.feedOverride = feedOverride
         self.onWillRelaunch = onWillRelaunch
+        self.onRelaunchAbandoned = onRelaunchAbandoned
         currentVersion = Bundle.main.shortVersion
         currentBuild = Bundle.main.buildVersion
         super.init()
@@ -108,6 +115,7 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
     }
 
     func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+        relaunchAnnounced = true
         onWillRelaunch()
     }
 
@@ -143,6 +151,12 @@ final class UpdateController: NSObject, SPUUpdaterDelegate {
         model.apply(event)
         if model.state != state { state = model.state }
         if model.showsBadge != showsBadge { showsBadge = model.showsBadge }
+        // The install failed or Sparkle closed the session after all: what was saved for the new
+        // copy must not resume a session in some later launch.
+        if relaunchAnnounced, event == .dismissed || model.state.isFailed {
+            relaunchAnnounced = false
+            onRelaunchAbandoned()
+        }
     }
 }
 
@@ -161,3 +175,10 @@ protocol UpdateSource: AnyObject, Observable {
 }
 
 extension UpdateController: UpdateSource {}
+
+private extension UpdateState {
+    var isFailed: Bool {
+        if case .failed = self { return true }
+        return false
+    }
+}

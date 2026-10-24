@@ -37,6 +37,8 @@ public protocol ResumeStore: Sendable {
     func save(_ s: ResumeSnapshot)
     /// Читает и удаляет: снимок годится для одного запуска.
     func take() -> ResumeSnapshot?
+    /// Удаляет непрочитанным: перезапуск после сохранения не состоялся.
+    func discard()
 }
 
 public struct UserDefaultsResumeStore: ResumeStore {
@@ -49,6 +51,10 @@ public struct UserDefaultsResumeStore: ResumeStore {
     public func save(_ s: ResumeSnapshot) {
         guard let data = try? JSONEncoder().encode(s) else { return }
         defaults.set(data, forKey: Self.key)
+    }
+
+    public func discard() {
+        defaults.removeObject(forKey: Self.key)
     }
 
     public func take() -> ResumeSnapshot? {
