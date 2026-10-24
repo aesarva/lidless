@@ -87,9 +87,28 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
         set { lock.withLock { _lastInfo = newValue } }
     }
 
+    private var _freshInfoError: HelperError?
+    /// Thrown by `freshInfo()` while set; `lastInfo()` still answers `stubInfo`.
+    var freshInfoError: HelperError? {
+        get { lock.withLock { _freshInfoError } }
+        set { lock.withLock { _freshInfoError = newValue } }
+    }
+
+    private var _holdSets = false
+    private let setGate = DispatchSemaphore(value: 0)
+    /// While set, each `setSleepDisabled` waits for a `releaseSet()` (a slow daemon). The call
+    /// is recorded, and its connection's generation taken, before it waits.
+    var holdSets: Bool {
+        get { lock.withLock { _holdSets } }
+        set { lock.withLock { _holdSets = newValue } }
+    }
+    /// Lets one waiting (or the next) `setSleepDisabled` go on.
+    func releaseSet() { setGate.signal() }
+
     func status() -> HelperStatus { stubStatus }
     func lastInfo() -> HelperInfo? { stubInfo }
     func freshInfo() throws -> HelperInfo {
+        if let error = freshInfoError { throw error }
         guard let info = stubInfo else { throw HelperError.commandFailed("no info") }
         return info
     }
@@ -115,12 +134,15 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
     }
     func openSystemSettings() {}
     func setSleepDisabled(_ disabled: Bool) throws -> UInt64 {
-        lock.lock()
-        _setCalls.append(disabled)
-        let failure = _failNextSet
-        _failNextSet = nil
-        let generation = _generation
-        lock.unlock()
+        let (generation, waits) = lock.withLock { () -> (UInt64, Bool) in
+            _setCalls.append(disabled)
+            return (_generation, _holdSets)
+        }
+        if waits { setGate.wait() }
+        let failure = lock.withLock { () -> HelperError? in
+            defer { _failNextSet = nil }
+            return _failNextSet
+        }
         if let failure { throw failure }
         return generation
     }
@@ -352,33 +374,107 @@ struct FakeError: Error {}
     func cancelEndingSoon() { cancelEndingSoonCount += 1 }
 }
 
+/// The helper service as the controller sees it. With `autoConfirm` each wish is answered at
+/// once, as the service would answer it: an acquisition only for a verified helper
+/// (`.installed`), a release without a call when no daemon is registered. Without it the test
+/// answers with `deliver`.
 @MainActor final class FakeLid: LidSleepControlling {
-    var enableCalls = 0
-    var disableCalls = 0
-    var recoverCalls = 0
-    var lostGenerations: [UInt64] = []
-    /// What `connectionLost(generation:)` answers: whether the loss ended the current hold.
-    var lossAffectsHold = true
-    var failEnable = false
-    var failDisable = false
-    var failRecover = false
     var status: HelperStatus = .installed
+    var onChange: ((LidHold) -> Void)?
+    private(set) var hold = LidHold()
+    /// Every `setWanted`, in order.
+    var wanted: [Bool] = []
+    var autoConfirm = true
+    /// With `autoConfirm`: acquisitions fail.
+    var failEnable = false
+    /// With `autoConfirm`: releases sent to the daemon fail and the hold stays as it was.
+    var failDisable = false
+    /// With `autoConfirm`: acquisitions sent to a verified helper (failed ones too).
+    var acquireCalls = 0
+    var retryCalls = 0
+    var lostGenerations: [UInt64] = []
+    /// Whether `connectionLost(generation:)` ends a confirmed hold.
+    var lossAffectsHold = true
+    /// What `confirmReleased` answers.
+    var confirmResult = true
+    var confirmCalls = 0
+    /// `confirmReleased` waits for `deliverConfirm()`.
+    var holdConfirm = false
+    private var heldConfirm: (wishes: Int, done: @MainActor (Bool) -> Void)?
+
     func helperStatus() -> HelperStatus { status }
-    func enable() throws {
-        enableCalls += 1
-        if failEnable { throw FakeError() }
+
+    func setWanted(_ wanted: Bool) {
+        self.wanted.append(wanted)
+        deliver(held: hold.held, pending: wanted != hold.held)
+        if autoConfirm { converge() }
     }
-    func disable() throws {
-        disableCalls += 1
-        if failDisable { throw FakeError() }
+
+    func deliver(held: Bool, pending: Bool = false, failure: String? = nil) {
+        hold = LidHold(held: held, pending: pending, failure: failure)
+        onChange?(hold)
     }
-    func recoverIfNeeded() -> Bool {
-        recoverCalls += 1
-        return !failRecover
+
+    func retry() {
+        retryCalls += 1
+        if autoConfirm, hold.failure != nil { converge() }
     }
-    func connectionLost(generation: UInt64) -> Bool {
+
+    func confirmReleased(_ done: @escaping @MainActor (Bool) -> Void) {
+        confirmCalls += 1
+        if holdConfirm {
+            heldConfirm = (wanted.count, done)
+        } else {
+            answerConfirm(done)
+        }
+    }
+
+    /// Answers the held confirmation, unless a newer wish came since (like the service).
+    func deliverConfirm() {
+        guard let pending = heldConfirm else { return }
+        heldConfirm = nil
+        guard pending.wishes == wanted.count else { return }
+        answerConfirm(pending.done)
+    }
+
+    func connectionLost(generation: UInt64) {
         lostGenerations.append(generation)
-        return lossAffectsHold
+        guard lossAffectsHold, hold.held else { return }
+        let wish = wanted.last ?? false
+        deliver(held: false, pending: wish)
+        if autoConfirm, wish { converge() }
+    }
+
+    private func answerConfirm(_ done: @MainActor (Bool) -> Void) {
+        // A daemon that holds nothing has reached the wish "no", whatever the last release said.
+        if confirmResult, !(wanted.last ?? false), hold.failure != nil { deliver(held: false) }
+        done(confirmResult)
+    }
+
+    private func converge() {
+        if wanted.last ?? false {
+            guard status == .installed else {
+                deliver(held: hold.held, failure: LidHold.helperNotReady)
+                return
+            }
+            acquireCalls += 1
+            if failEnable {
+                deliver(held: false, failure: "enable failed")
+            } else {
+                deliver(held: true)
+            }
+        } else {
+            switch status {
+            case .installed, .error, .checking:
+                if failDisable {
+                    deliver(held: hold.held, failure: "disable failed")
+                    return
+                }
+            case .notInstalled, .needsApproval, .unsigned:
+                break
+            }
+            deliver(held: false)
+        }
     }
 }
 

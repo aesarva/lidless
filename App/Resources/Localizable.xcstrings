@@ -787,6 +787,16 @@
         }
       }
     },
+    "Turning on…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Включается…"
+          }
+        }
+      }
+    },
     "Until…": {
       "localizations": {
         "ru": {

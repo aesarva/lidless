@@ -29,19 +29,21 @@ struct SessionControllerSafetyTests {
         c.start(.indefinite)
     }
 
-    /// Lets deferred main-actor work (the refresh request) run until `condition` holds.
+    /// Lets deferred main-actor work (the refresh request) and the helper service's queue run
+    /// until `condition` holds, for up to 2 s.
     func until(_ condition: () -> Bool) async {
-        var spins = 0
-        while !condition(), spins < 1000 {
+        let deadline = Date().addingTimeInterval(2)
+        while !condition(), Date() < deadline {
             await Task.yield()
-            spins += 1
+            if !condition() { try? await Task.sleep(nanoseconds: 1_000_000) }
         }
         #expect(condition())
     }
 
     @Test func startWithLidModeEnables() {
         startWithLid()
-        #expect(lid.enableCalls == 1)
+        #expect(lid.wanted == [true])
+        #expect(lid.acquireCalls == 1)
         #expect(c.session?.lidModeActive == true)
         #expect(c.session?.lidModeEnabledAt == t0)
     }
@@ -49,13 +51,13 @@ struct SessionControllerSafetyTests {
     @Test func stopDisablesLid() {
         startWithLid()
         c.stop(.user)
-        #expect(lid.disableCalls == 1)
+        #expect(lid.wanted == [true, false])
     }
 
     @Test func appQuitDisablesLidMode() {
         startWithLid()
         c.stop(.appQuit)
-        #expect(lid.disableCalls == 1)
+        #expect(lid.wanted == [true, false])
         #expect(!notifier.posted.contains(.sessionEnded(.appQuit)))
     }
 
@@ -64,7 +66,8 @@ struct SessionControllerSafetyTests {
         startWithLid()
         c.setLidMode(false)
         c.setLidMode(true)
-        #expect(lid.enableCalls == 2)
+        #expect(lid.wanted == [true, false, true])
+        #expect(lid.acquireCalls == 2)
         #expect(helperUnavailablePosts() == 1)
     }
 
@@ -85,7 +88,7 @@ struct SessionControllerSafetyTests {
         #expect(c.session?.lidModeActive == false)
         #expect(c.session?.lidModeSuspendedReason == .thermal)
         #expect(c.settings.lidModeEnabled == true)
-        #expect(lid.disableCalls == 1)
+        #expect(lid.wanted == [true, false])
         #expect(c.attention == .thermal)
         #expect(notifier.posted.contains(.lidModeSuspended(.thermal)))
     }
@@ -113,7 +116,7 @@ struct SessionControllerSafetyTests {
         startWithLid()
         c.setLidMode(false)
         #expect(c.settings.lidModeEnabled == false)
-        #expect(lid.disableCalls == 1)
+        #expect(lid.wanted == [true, false])
         #expect(c.session?.lidModeActive == false)
     }
 
@@ -132,27 +135,37 @@ struct SessionControllerSafetyTests {
         #expect(c.attention == nil)
     }
 
-    @Test func suspendDisableFailureKeepsLidActiveAndRetriesOnStop() {
+    /// The suspension is recorded at once; the failed release leaves a reset pending, which
+    /// the poll retries and reports once.
+    @Test func suspendDisableFailureSuspendsAndRetriesRelease() {
         startWithLid()
         lid.failDisable = true
+        lid.confirmResult = false
         c.update(readings: readings(thermal: .serious))
         c.update(readings: readings(thermal: .serious))
-        #expect(c.session?.lidModeActive == true)
-        #expect(c.session?.lidModeSuspendedReason == nil)
+        #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
         #expect(c.attention == .helperUnavailable)
-        let n = notifier.posted.filter { $0 == .lidModeSuspended(.helperUnavailable) }.count
-        #expect(n == 1)
-        let before = lid.disableCalls
+        #expect(notifier.posted == [.lidModeSuspended(.thermal), .lidModeSuspended(.helperUnavailable)])
+        #expect(lid.wanted == [true, false])
         lid.failDisable = false
-        c.stop(.user)
-        #expect(lid.disableCalls == before + 1)
+        lid.confirmResult = true
+        c.update(readings: readings())
+        #expect(lid.hold == LidHold())
+        c.clearAttention()
+        #expect(c.attention == nil)
     }
 
-    @Test func setLidModeOffDisableFailureKeepsLidActive() {
+    /// The switch is off at once; the failed release keeps the warning up until the daemon
+    /// confirms it holds nothing.
+    @Test func setLidModeOffDisableFailureLeavesResetPending() {
         startWithLid()
         lid.failDisable = true
         c.setLidMode(false)
-        #expect(c.session?.lidModeActive == true)
+        #expect(c.session?.lidModeActive == false)
+        #expect(c.attention == .helperUnavailable)
+        #expect(helperUnavailablePosts() == 1)
+        c.clearAttention()
         #expect(c.attention == .helperUnavailable)
     }
 
@@ -182,20 +195,21 @@ struct SessionControllerSafetyTests {
         lid.failDisable = true
         c.stop(.user)
         #expect(c.state == .off)
-        lid.failRecover = true
+        lid.confirmResult = false
         c.update(readings: readings())
         c.update(readings: readings())
-        #expect(lid.recoverCalls == 2)
+        #expect(lid.confirmCalls == 2)
         #expect(c.attention == .helperUnavailable)
         #expect(helperUnavailablePosts() == 1)
         c.clearAttention()
         #expect(c.attention == .helperUnavailable)
 
-        lid.failRecover = false
+        lid.confirmResult = true
         c.update(readings: readings())
-        #expect(c.attention == .helperUnavailable)
-        c.clearAttention()
         #expect(c.attention == nil)
+        c.update(readings: readings())
+        #expect(lid.confirmCalls == 3)
+        #expect(helperUnavailablePosts() == 1)
     }
 
     @Test func successfulRecoveryWhileOffKeepsUnrelatedAttention() {
@@ -204,45 +218,43 @@ struct SessionControllerSafetyTests {
         #expect(c.attention == .lowBattery)
         c.update(readings: readings(level: 10, onBattery: true))
         #expect(c.attention == .lowBattery)
-        #expect(lid.recoverCalls == 1)
+        #expect(lid.confirmCalls == 0)
     }
 
     @Test func failedRecoveryAfterClearRaisesAgain() {
-        lid.failRecover = true
-        c.update(readings: readings())
+        startWithLid()
+        lid.failDisable = true
+        c.stop(.user)
         #expect(c.attention == .helperUnavailable)
         #expect(helperUnavailablePosts() == 1)
         c.clearAttention()
+        lid.confirmResult = false
         c.update(readings: readings())
         #expect(c.attention == .helperUnavailable)
         #expect(helperUnavailablePosts() == 1)
-    }
-
-    @Test func recoverAtLaunchFailureRaisesAttention() {
-        lid.failRecover = true
-        c.recoverAtLaunch()
-        #expect(lid.recoverCalls == 1)
-        #expect(c.attention == .helperUnavailable)
-        #expect(helperUnavailablePosts() == 1)
-        c.clearAttention()
-        #expect(c.attention == .helperUnavailable)
     }
 
     @Test func helperDidChangeRetriesRecoveryWhileOff() {
-        lid.failRecover = true
-        c.recoverAtLaunch()
+        startWithLid()
+        lid.failDisable = true
+        c.stop(.user)
         #expect(c.attention == .helperUnavailable)
-        lid.failRecover = false
+        lid.failDisable = false
         c.helperDidChange()
-        #expect(lid.recoverCalls == 2)
+        #expect(lid.confirmCalls == 1)
+        #expect(lid.hold == LidHold())
         c.clearAttention()
         #expect(c.attention == nil)
     }
 
     @Test func helperDidChangeFailureRaisesAttention() {
-        lid.failRecover = true
+        startWithLid()
+        lid.failDisable = true
+        c.stop(.user)
+        c.clearAttention()
+        lid.confirmResult = false
         c.helperDidChange()
-        #expect(lid.recoverCalls == 1)
+        #expect(lid.confirmCalls == 1)
         #expect(c.attention == .helperUnavailable)
         #expect(helperUnavailablePosts() == 1)
     }
@@ -250,8 +262,8 @@ struct SessionControllerSafetyTests {
     @Test func helperDidChangeWhileActiveDoesNotRecover() {
         startWithLid()
         c.helperDidChange()
-        #expect(lid.recoverCalls == 0)
-        #expect(lid.disableCalls == 0)
+        #expect(lid.confirmCalls == 0)
+        #expect(lid.wanted == [true])
         #expect(c.session?.lidModeActive == true)
     }
 
@@ -261,7 +273,8 @@ struct SessionControllerSafetyTests {
         startWithLid()
         clock.advance(60)
         c.helperConnectionLost(generation: 1)
-        #expect(lid.enableCalls == 2)
+        #expect(lid.acquireCalls == 2)
+        #expect(lid.wanted == [true])
         #expect(c.session?.lidModeActive == true)
         // The battery time limit keeps counting from the original enable.
         #expect(c.session?.lidModeEnabledAt == t0)
@@ -275,7 +288,7 @@ struct SessionControllerSafetyTests {
         lid.failEnable = true
         c.helperConnectionLost(generation: 1)
         c.helperConnectionLost(generation: 1)
-        #expect(lid.enableCalls == 2)
+        #expect(lid.acquireCalls == 2)
         #expect(c.session?.lidModeActive == false)
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
         #expect(c.attention == .helperUnavailable)
@@ -306,15 +319,15 @@ struct SessionControllerSafetyTests {
         lid.failEnable = true
         c.helperConnectionLost(generation: 1)
         lid.failEnable = false
-        let before = lid.enableCalls
+        let before = lid.acquireCalls
         c.update(readings: readings(thermal: .serious))
-        #expect(lid.enableCalls == before)
+        #expect(lid.acquireCalls == before)
         #expect(c.session?.lidModeActive == false)
         #expect(c.session?.lidModeSuspendedReason == .thermal)
         #expect(c.attention == .thermal)
         #expect(notifier.posted.contains(.lidModeSuspended(.thermal)))
         c.update(readings: readings())
-        #expect(lid.enableCalls == before)
+        #expect(lid.acquireCalls == before)
     }
 
     @Test func recoveryAfterBatteryLimitStaysSuspended() {
@@ -324,21 +337,30 @@ struct SessionControllerSafetyTests {
         lid.failEnable = false
         clock.advance(240 * 60)
         c.update(readings: readings(onBattery: true, lidClosed: true, since: t0))
-        #expect(lid.enableCalls == 2)
+        #expect(lid.acquireCalls == 2)
         #expect(c.session?.lidModeActive == false)
         #expect(c.session?.lidModeSuspendedReason == .lidOnBatteryLimit)
     }
 
+    /// The thermal suspension is recorded even though the release failed; the daemon lets go
+    /// when the connection drops, and nothing is taken again.
     @Test func connectionLostWhileHotSuspendsForThermal() {
         startWithLid()
         lid.failDisable = true
+        lid.confirmResult = false
         c.update(readings: readings(thermal: .serious))
-        #expect(c.session?.lidModeActive == true)
-        c.helperConnectionLost(generation: 1)
-        #expect(lid.enableCalls == 1)
         #expect(c.session?.lidModeActive == false)
         #expect(c.session?.lidModeSuspendedReason == .thermal)
-        #expect(c.attention == .thermal)
+        c.helperConnectionLost(generation: 1)
+        #expect(lid.acquireCalls == 1)
+        #expect(lid.hold == LidHold())
+        #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        #expect(c.attention == .helperUnavailable)
+        lid.confirmResult = true
+        c.update(readings: readings())
+        #expect(c.attention == nil)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
     }
 
     @Test func pollDoesNotRetryOtherSuspensions() {
@@ -346,7 +368,7 @@ struct SessionControllerSafetyTests {
         c.update(readings: readings(thermal: .serious))
         #expect(c.session?.lidModeSuspendedReason == .thermal)
         c.update(readings: readings())
-        #expect(lid.enableCalls == 1)
+        #expect(lid.acquireCalls == 1)
         #expect(c.session?.lidModeActive == false)
     }
 
@@ -356,7 +378,7 @@ struct SessionControllerSafetyTests {
         c.setLidMode(false)
         lid.failEnable = false
         c.update(readings: readings())
-        #expect(lid.enableCalls == 1)
+        #expect(lid.acquireCalls == 1)
     }
 
     /// A helper in error would only time out, on the main thread: the poll asks for a
@@ -374,11 +396,11 @@ struct SessionControllerSafetyTests {
         #expect(refreshes == 0)
         lid.status = .error("timed out")
         c.update(readings: readings())
-        #expect(lid.enableCalls == 1)
+        #expect(lid.acquireCalls == 1)
         await until { refreshes == 1 }
         lid.status = .installed
         c.update(readings: readings())
-        #expect(lid.enableCalls == 2)
+        #expect(lid.acquireCalls == 2)
         #expect(c.session?.lidModeActive == true)
     }
 
@@ -392,7 +414,7 @@ struct SessionControllerSafetyTests {
         c.start(.indefinite)
         lid.status = .error("timed out")
         c.setLidMode(true)
-        #expect(lid.enableCalls == 0)
+        #expect(lid.acquireCalls == 0)
         await until { refreshes == 1 }
         #expect(c.session?.lidModeActive == false)
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
@@ -400,7 +422,7 @@ struct SessionControllerSafetyTests {
         #expect(helperUnavailablePosts() == 1)
         lid.status = .installed
         c.helperDidChange()
-        #expect(lid.enableCalls == 1)
+        #expect(lid.acquireCalls == 1)
         #expect(c.session?.lidModeActive == true)
         #expect(c.session?.lidModeSuspendedReason == nil)
         // As after any helper failure, the dot goes when the user opens the panel.
@@ -420,7 +442,7 @@ struct SessionControllerSafetyTests {
         c.clearAttention()
         #expect(c.attention == nil)
         c.update(readings: readings())
-        #expect(lid.enableCalls == 0)
+        #expect(lid.acquireCalls == 0)
         await until { refreshes == 2 }
         #expect(c.attention == .helperUnavailable)
         #expect(helperUnavailablePosts() == 2)
@@ -431,10 +453,10 @@ struct SessionControllerSafetyTests {
     /// must not take lid mode from inside the call that just gave up on it.
     @Test func refreshRequestNeverReentersEnable() async {
         var requests = 0
-        var enableCallsAtRequest: Int?
+        var acquireCallsAtRequest: Int?
         c.onHelperRefreshNeeded = { [c, lid] in
             requests += 1
-            enableCallsAtRequest = lid.enableCalls
+            acquireCallsAtRequest = lid.acquireCalls
             lid.status = .installed
             c.helperDidChange()
         }
@@ -443,10 +465,10 @@ struct SessionControllerSafetyTests {
         c.setLidMode(true)
         // Not yet: the request is deferred, so nothing ran inside setLidMode.
         #expect(requests == 0)
-        #expect(lid.enableCalls == 0)
+        #expect(lid.acquireCalls == 0)
         await until { requests == 1 }
-        #expect(enableCallsAtRequest == 0)
-        #expect(lid.enableCalls == 1)
+        #expect(acquireCallsAtRequest == 0)
+        #expect(lid.acquireCalls == 1)
         #expect(c.session?.lidModeActive == true)
         #expect(c.session?.lidModeSuspendedReason == nil)
     }
@@ -472,7 +494,7 @@ struct SessionControllerSafetyTests {
         c.onHelperRefreshNeeded = { refreshes += 1 }
         lid.status = .error("timed out")
         startWithLid()
-        #expect(lid.enableCalls == 0)
+        #expect(lid.acquireCalls == 0)
         await until { refreshes == 1 }
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
         #expect(c.attention == .helperUnavailable)
@@ -498,8 +520,8 @@ struct SessionControllerSafetyTests {
         await until { refresh != nil }
         await refresh?.value
         #expect(backend.refreshInfoCalls == 1)
+        await until { c.session?.lidModeActive == true }
         #expect(backend.setCalls == [true])
-        #expect(c.session?.lidModeActive == true)
     }
 
     /// The refresh still fails: lid mode keeps waiting with the warning up and the daemon is
@@ -537,14 +559,14 @@ struct SessionControllerSafetyTests {
             c.start(.indefinite)
             lid.status = status
             c.setLidMode(true)
-            #expect(lid.enableCalls == 0)
+            #expect(lid.acquireCalls == 0)
             #expect(c.session?.lidModeActive == false)
             #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
             #expect(notifier.posted.isEmpty)
             #expect(c.attention == nil)
             lid.status = .installed
             c.helperDidChange()
-            #expect(lid.enableCalls == 1)
+            #expect(lid.acquireCalls == 1)
             #expect(c.session?.lidModeActive == true)
             #expect(c.session?.lidModeSuspendedReason == nil)
         }
@@ -553,7 +575,7 @@ struct SessionControllerSafetyTests {
     @Test func startWithLidModeWaitsSilentlyForApproval() {
         lid.status = .needsApproval
         startWithLid()
-        #expect(lid.enableCalls == 0)
+        #expect(lid.acquireCalls == 0)
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
         #expect(notifier.posted.isEmpty)
         #expect(c.attention == nil)
@@ -570,10 +592,10 @@ struct SessionControllerSafetyTests {
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
         #expect(c.attention == .helperUnavailable)
         #expect(notifier.posted == [.lidModeSuspended(.helperUnavailable)])
-        #expect(lid.enableCalls == 1)
+        #expect(lid.acquireCalls == 1)
         lid.status = .installed
         c.helperDidChange()
-        #expect(lid.enableCalls == 2)
+        #expect(lid.acquireCalls == 2)
         #expect(c.session?.lidModeActive == true)
     }
 
@@ -589,7 +611,7 @@ struct SessionControllerSafetyTests {
         #expect(store.stored.lidModeEnabled == true)
         #expect(c.session?.lidModeActive == false)
         #expect(c.session?.lidModeSuspendedReason == .thermal)
-        #expect(lid.enableCalls == 1)
+        #expect(lid.acquireCalls == 1)
     }
 
     /// Lid mode that was on comes back through the safety-checked retry, keeping its start.
@@ -597,38 +619,41 @@ struct SessionControllerSafetyTests {
         startWithLid()
         clock.advance(600)
         let point = c.beginHelperRemoval()
-        #expect(lid.disableCalls == 1)
+        #expect(lid.wanted == [true, false])
         #expect(c.session?.lidModeActive == false)
         c.restoreAfterFailedRemoval(point)
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
         #expect(c.attention == nil)
         #expect(notifier.posted.isEmpty)
-        #expect(lid.enableCalls == 1)
+        #expect(lid.acquireCalls == 1)
         c.update(readings: readings())
-        #expect(lid.enableCalls == 2)
+        #expect(lid.acquireCalls == 2)
         #expect(c.session?.lidModeActive == true)
         #expect(c.session?.lidModeEnabledAt == t0)
     }
 
-    /// A safety suspension that happened during the removal stays: the restore must not turn
-    /// it into a helper wait that the poll would re-acquire.
+    /// Lid mode is off at once even when the release during the removal fails; restored, it
+    /// comes back only through the safety-checked retry, which turns a hot Mac into a thermal
+    /// suspension that stays.
     @Test func failedRemovalKeepsANewerSafetySuspension() {
         startWithLid()
         lid.failDisable = true
         let point = c.beginHelperRemoval()
-        #expect(c.session?.lidModeActive == true)
+        #expect(c.session?.lidModeActive == false)
         lid.failDisable = false
-        c.update(readings: readings(thermal: .serious))
-        #expect(c.session?.lidModeSuspendedReason == .thermal)
         c.restoreAfterFailedRemoval(point)
         #expect(c.settings.lidModeEnabled == true)
+        #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+        c.update(readings: readings(thermal: .serious))
         #expect(c.session?.lidModeSuspendedReason == .thermal)
         c.update(readings: readings())
-        #expect(lid.enableCalls == 1)
+        #expect(lid.acquireCalls == 1)
         #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
     }
 
-    /// A restore point from an earlier session only brings back the setting.
+    /// A restore point from an earlier session only brings back the setting; the running
+    /// session follows it from the next readings, with a new battery-limit interval.
     @Test func failedRemovalIgnoresAnotherSession() {
         startWithLid()
         let point = c.beginHelperRemoval()
@@ -638,8 +663,10 @@ struct SessionControllerSafetyTests {
         c.restoreAfterFailedRemoval(point)
         #expect(c.settings.lidModeEnabled == true)
         #expect(c.session?.lidModeSuspendedReason == nil)
+        #expect(lid.acquireCalls == 1)
         c.update(readings: readings())
-        #expect(lid.enableCalls == 1)
+        #expect(lid.acquireCalls == 2)
+        #expect(c.session?.lidModeEnabledAt == clock.now)
     }
 
     /// Choosing another duration during the removal is the same session: lid mode comes back.
@@ -652,7 +679,7 @@ struct SessionControllerSafetyTests {
         c.restoreAfterFailedRemoval(point)
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
         c.update(readings: readings())
-        #expect(lid.enableCalls == 2)
+        #expect(lid.acquireCalls == 2)
         #expect(c.session?.lidModeActive == true)
         #expect(c.session?.lidModeEnabledAt == t0)
     }
@@ -664,30 +691,32 @@ struct SessionControllerSafetyTests {
         #expect(c.settings.lidModeEnabled == false)
         #expect(c.session?.lidModeSuspendedReason == nil)
         c.update(readings: readings())
-        #expect(lid.enableCalls == 0)
+        #expect(lid.acquireCalls == 0)
     }
 
     /// Loss of an older connection reported after lid mode was re-acquired on a newer one:
     /// ignored, and the hold is still released later.
-    @Test func staleConnectionLossAfterReacquireIsIgnored() {
+    @Test func staleConnectionLossAfterReacquireIsIgnored() async {
         let backend = FakeBackend()
         let service = LidSleepService(backend: backend)
         let c = SessionController(assertions: assertions, lid: service, notifier: notifier,
                                   settingsStore: store, clock: clock)
         c.settings.lidModeEnabled = true
         c.start(.indefinite)
+        await until { c.session?.lidModeActive == true }
         backend.generation = 2
         c.setLidMode(false)
+        await until { backend.setCalls == [true, false] }
         c.setLidMode(true)
+        await until { c.session?.lidModeActive == true }
         #expect(backend.setCalls == [true, false, true])
 
         c.helperConnectionLost(generation: 1)
-        #expect(backend.setCalls == [true, false, true])
         #expect(c.session?.lidModeActive == true)
 
         c.update(readings: readings(thermal: .serious))
         #expect(c.session?.lidModeSuspendedReason == .thermal)
-        #expect(backend.setCalls == [true, false, true, false])
+        await until { backend.setCalls == [true, false, true, false] }
     }
 
     @Test func connectionLossThatDoesNotAffectTheHoldIsIgnored() {
@@ -695,7 +724,7 @@ struct SessionControllerSafetyTests {
         lid.lossAffectsHold = false
         lid.failEnable = true
         c.helperConnectionLost(generation: 1)
-        #expect(lid.enableCalls == 1)
+        #expect(lid.acquireCalls == 1)
         #expect(c.session?.lidModeActive == true)
         #expect(notifier.posted.isEmpty)
     }
@@ -722,31 +751,33 @@ struct SessionControllerSafetyTests {
 
     @Test func connectionLostWithoutLidModeDoesNothing() {
         c.helperConnectionLost(generation: 1)
-        #expect(lid.enableCalls == 0)
+        #expect(lid.acquireCalls == 0)
         c.start(.indefinite)
         c.helperConnectionLost(generation: 1)
-        #expect(lid.enableCalls == 0)
+        #expect(lid.acquireCalls == 0)
         #expect(notifier.posted.isEmpty)
     }
 
-    /// A failed disable leaves lid mode active with the setting off: the lost connection
-    /// already released it, so it must not be turned back on.
+    /// A failed disable leaves a reset pending with lid mode off: the lost connection released
+    /// the hold, so it is not turned back on, and the next readings confirm the reset.
     @Test func connectionLostAfterUserTurnedLidModeOffDoesNotReenable() {
         startWithLid()
         lid.failDisable = true
         c.setLidMode(false)
-        #expect(c.session?.lidModeActive == true)
+        #expect(c.session?.lidModeActive == false)
         #expect(c.attention == .helperUnavailable)
         c.helperConnectionLost(generation: 1)
-        #expect(lid.enableCalls == 1)
+        #expect(lid.acquireCalls == 1)
         #expect(lid.lostGenerations == [1])
+        #expect(lid.wanted == [true, false])
         #expect(c.session?.lidModeActive == false)
         #expect(c.session?.lidModeSuspendedReason == nil)
+        c.update(readings: readings())
         #expect(c.attention == nil)
 
         lid.failDisable = false
         c.setLidMode(true)
-        #expect(lid.enableCalls == 2)
+        #expect(lid.acquireCalls == 2)
         #expect(c.session?.lidModeActive == true)
     }
 
@@ -756,16 +787,16 @@ struct SessionControllerSafetyTests {
         #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
         lid.failEnable = false
         c.helperDidChange()
-        #expect(lid.enableCalls == 2)
+        #expect(lid.acquireCalls == 2)
         #expect(c.session?.lidModeActive == true)
-        #expect(lid.recoverCalls == 0)
+        #expect(lid.confirmCalls == 0)
     }
 
     @Test func setLidModeOnWhileActiveIsNoop() {
         startWithLid()
         clock.advance(60)
         c.setLidMode(true)
-        #expect(lid.enableCalls == 1)
+        #expect(lid.acquireCalls == 1)
         #expect(c.session?.lidModeEnabledAt == t0)
     }
 }

@@ -32,16 +32,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         backend = DaemonBackend(registration: SMAppServiceRegistration(), client: client,
                                 appVersion: Bundle.main.shortVersion, appBuild: Bundle.main.buildVersion)
         // A 0.2.0 closed-lid session force-quit just before this launch: its watchdog sees this
-        // process and never resets, and a daemon not yet approved cannot. In the background:
-        // sudo may take a moment, and it only ever writes 0.
+        // process and never resets, and a daemon not yet approved cannot. First on the lid
+        // queue, off the main thread (sudo may take a moment, and it only ever writes 0): lid
+        // mode waits for it quietly instead of racing it.
         let helperStatus = backend.status()
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let otherCopyRunning = NSRunningApplication.runningApplications(withBundleIdentifier: HelperIDs.app)
             .contains { $0.processIdentifier != ownPID }
-        DispatchQueue.global(qos: .utility).async {
+        lid = LidSleepService(backend: backend, first: {
             LegacySleepReset().resetIfNeeded(helperStatus: helperStatus, otherCopyRunning: otherCopyRunning)
-        }
-        lid = LidSleepService(backend: backend)
+        })
         notifier = UserNotifier()
         let clock = SystemClock()
         lidControl = lid
@@ -93,10 +93,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             helper: helper,
             openSettings: { [weak self] tab in self?.settingsWindow.show(tab: tab) }
         )
-        // Order matters: undo a leftover lid mode, then take the first readings
-        // (engine.start() refreshes immediately), then start-on-launch sees them. The daemon
-        // removes a 0.2.0 helper itself when it starts, before any client can connect.
-        controller.recoverAtLaunch()
+        // Order matters: take the first readings (engine.start() refreshes immediately), then
+        // start-on-launch sees them. The daemon undoes a leftover hold and removes a 0.2.0
+        // helper itself when it starts, before any client can connect.
         engine.start()
         controller.startOnLaunchIfEnabled()
         statusItem.refresh()
@@ -161,10 +160,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         guard let controller else { return } // nil when a debug snapshot run quits early
         // Leave the Mac exactly as macOS would have it: the session's assertions go with the
-        // process, and closed-lid mode (`pmset disablesleep`) is turned back off here.
+        // process. Closed-lid mode (`pmset disablesleep`) is released without waiting: the
+        // daemon lets go of this app's hold when its connection closes with the process.
         if case .active = controller.state { controller.stop(.appQuit) }
-        // Kept for the protocol; the daemon also lets go when this process's connection closes.
-        _ = lidControl.recoverIfNeeded()
     }
 }
 

@@ -55,9 +55,10 @@ struct LidRow: View {
 
     private var suspended: SafetyReason? { controller.session?.lidModeSuspendedReason }
 
-    /// What the switch shows: the live state during a session, the setting otherwise.
+    /// What the switch shows: the live state during a session (on its way counts as on),
+    /// the setting otherwise.
     private var isOn: Bool {
-        if let s = controller.session { return s.lidModeActive }
+        if let s = controller.session { return s.lidModeActive || s.lidModePending }
         return controller.settings.lidModeEnabled
     }
 
@@ -78,6 +79,9 @@ struct LidRow: View {
             return (String(localized: "helper error: \(message)"), Studio.caution)
         case .installed:
             break
+        }
+        if controller.session?.lidModePending == true {
+            return (String(localized: "Turning on…"), Studio.inkDim)
         }
         if let reason = suspended {
             switch reason {
@@ -130,8 +134,7 @@ struct LidRow: View {
             if suspended != nil {
                 controller.setLidMode(true)
             } else {
-                // Decide on what the switch shows: after a failed disable the setting is off
-                // but lid mode is still active, and a tap must retry the disable.
+                // Decide on what the switch shows: lid mode on its way turns off.
                 controller.setLidMode(!isOn)
             }
         }

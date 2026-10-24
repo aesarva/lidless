@@ -20,12 +20,18 @@ import LidlessCore
     func save(_ s: LidlessSettings) { settings = s }
 }
 
+/// Confirms every wish at once.
 @MainActor final class PreviewLid: LidSleepControlling {
+    var onChange: ((LidHold) -> Void)?
+    private(set) var hold = LidHold()
     func helperStatus() -> HelperStatus { .installed }
-    func enable() throws {}
-    func disable() throws {}
-    func recoverIfNeeded() -> Bool { true }
-    func connectionLost(generation: UInt64) -> Bool { false }
+    func setWanted(_ wanted: Bool) {
+        hold = LidHold(held: wanted)
+        onChange?(hold)
+    }
+    func retry() {}
+    func confirmReleased(_ done: @escaping @MainActor (Bool) -> Void) { done(true) }
+    func connectionLost(generation: UInt64) {}
 }
 
 final class PreviewBackend: PrivilegedBackend {

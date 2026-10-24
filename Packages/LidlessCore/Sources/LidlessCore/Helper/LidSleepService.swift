@@ -1,50 +1,231 @@
 import Foundation
 
+/// This app's hold on `disablesleep`, as the helper service last confirmed it.
+public struct LidHold: Equatable, Sendable {
+    /// The daemon took the hold for this app (its reply came over a connection still open).
+    public var held: Bool
+    /// The service has not brought the daemon to the wish yet.
+    public var pending: Bool
+    /// The last error while the wish is not reached.
+    public var failure: String?
+
+    public init(held: Bool = false, pending: Bool = false, failure: String? = nil) {
+        self.held = held
+        self.pending = pending
+        self.failure = failure
+    }
+
+    /// The failure of an acquisition that was not sent: the helper is not verified
+    /// (`.installed`) for this registration yet.
+    public static let helperNotReady = "helper not ready"
+}
+
 @MainActor public protocol LidSleepControlling: AnyObject {
     func helperStatus() -> HelperStatus
-    func enable() throws
-    func disable() throws
-    /// Undoes a `disablesleep 1` left behind by an earlier run. Returns false when that failed
-    /// (disablesleep may still be 1).
-    @discardableResult func recoverIfNeeded() -> Bool
-    /// The daemon connection of `generation` dropped. Returns true when that ended this
-    /// app's hold (then nothing is held any more); false for nothing held or a report about a
-    /// connection older than the one holding now.
-    func connectionLost(generation: UInt64) -> Bool
+    /// The last wish wins: the service brings the daemon to it in order, off the main thread,
+    /// and tries again after an error on `retry()`. Publishes `pending` at once.
+    func setWanted(_ wanted: Bool)
+    /// Called on the main actor whenever the hold changes or a step was answered.
+    var onChange: ((LidHold) -> Void)? { get set }
+    var hold: LidHold { get }
+    /// Tries an unreached wish again (called on each poll of the readings).
+    func retry()
+    /// A fresh `info`, queued after every command sent so far: true when the daemon answered
+    /// that it owns nothing. Not called at all when a new wish came in meanwhile.
+    func confirmReleased(_ done: @escaping @MainActor (Bool) -> Void)
+    /// The daemon connection of `generation` dropped: a hold it carried is gone, and is taken
+    /// again while wanted.
+    func connectionLost(generation: UInt64)
 }
 
 @MainActor public final class LidSleepService: LidSleepControlling {
-    private let backend: PrivilegedBackend
-    /// Set while this process holds disablesleep on: the generation of the daemon connection
-    /// that took the hold (the daemon releases it when that connection closes).
-    private var heldGeneration: UInt64?
+    /// What the queue and the main actor share, under `shared`'s lock.
+    private struct State {
+        var wanted = false
+        /// Bumped by every `setWanted`: an answer about an older wish is moot.
+        var wish: UInt64 = 0
+        /// Set while the daemon holds disablesleep for this process: the generation of the
+        /// connection that took the hold (the daemon releases it when that connection closes).
+        var heldGeneration: UInt64?
+        /// The newest connection reported lost. A reply over it or an older one (the enable's
+        /// reply racing the report) holds nothing.
+        var lostGeneration: UInt64?
+        /// A step is queued that has not read the wish yet: another would see the same one.
+        var stepQueued = false
+    }
 
-    public init(backend: PrivilegedBackend) {
+    private final class Shared: @unchecked Sendable {
+        private let lock = NSLock()
+        private var state = State()
+        func withLock<T>(_ body: (inout State) -> T) -> T { lock.withLock { body(&state) } }
+    }
+
+    private struct StepResult: Sendable {
+        let wish: UInt64
+        let failure: String?
+    }
+
+    private let backend: PrivilegedBackend
+    private let queue = DispatchQueue(label: "io.github.aesarva.Lidless.lid-sleep")
+    private let shared = Shared()
+    /// Steps queued whose answer has not reached the main actor yet.
+    private var outstanding = 0
+    public var onChange: ((LidHold) -> Void)?
+    public private(set) var hold = LidHold()
+
+    /// `first` runs on the queue before any command (the 0.2.0 reset, which must not race a
+    /// new hold).
+    public init(backend: PrivilegedBackend, first: (@Sendable () -> Void)? = nil) {
         self.backend = backend
+        if let first { queue.async(execute: first) }
     }
 
     public func helperStatus() -> HelperStatus { backend.status() }
 
-    public func enable() throws {
-        heldGeneration = try backend.setSleepDisabled(true)
+    public func setWanted(_ wanted: Bool) {
+        let held = shared.withLock { s -> Bool in
+            s.wanted = wanted
+            s.wish += 1
+            return s.heldGeneration != nil
+        }
+        publish(LidHold(held: held, pending: wanted != held))
+        enqueueStep()
     }
 
-    public func disable() throws {
-        guard heldGeneration != nil else { return }
-        try backend.setSleepDisabled(false)
-        heldGeneration = nil
+    public func retry() {
+        guard hold.failure != nil, outstanding == 0 else { return }
+        let (wanted, held) = shared.withLock { ($0.wanted, $0.heldGeneration != nil) }
+        publish(LidHold(held: held, pending: wanted != held))
+        enqueueStep()
     }
 
-    /// Nothing to do here: the daemon undoes a leftover 1 when it starts and when this app's
-    /// connection goes away.
-    @discardableResult
-    public func recoverIfNeeded() -> Bool { true }
+    public func confirmReleased(_ done: @escaping @MainActor (Bool) -> Void) {
+        let wish = shared.withLock { $0.wish }
+        queue.async { [weak self, backend] in
+            let released: Bool
+            switch backend.status() {
+            case .notInstalled, .needsApproval, .unsigned:
+                // No daemon is registered (or allowed to run): nothing holds for this app.
+                released = true
+            case .installed, .checking, .error:
+                released = (try? backend.freshInfo()).map { !$0.owned } ?? false
+            }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let (current, wanted) = self.shared.withLock { s -> (Bool, Bool) in
+                        guard s.wish == wish else { return (false, s.wanted) }
+                        // The wish "no" is reached, whatever the last release said.
+                        if released, !s.wanted { s.heldGeneration = nil }
+                        return (true, s.wanted)
+                    }
+                    guard current else { return }
+                    if released, !wanted, self.hold != LidHold() { self.publish(LidHold()) }
+                    done(released)
+                }
+            }
+        }
+    }
 
     /// Any connection up to the holding one counts: a newer one dropping means the holding
-    /// one was already gone. After that a `disable()` does not call the daemon.
-    public func connectionLost(generation: UInt64) -> Bool {
-        guard let held = heldGeneration, generation >= held else { return false }
-        heldGeneration = nil
-        return true
+    /// one was already gone.
+    public func connectionLost(generation: UInt64) {
+        let (ended, wanted, held) = shared.withLock { s -> (Bool, Bool, Bool) in
+            s.lostGeneration = max(s.lostGeneration ?? 0, generation)
+            guard let holding = s.heldGeneration, generation >= holding else {
+                return (false, s.wanted, s.heldGeneration != nil)
+            }
+            s.heldGeneration = nil
+            return (true, s.wanted, false)
+        }
+        if ended {
+            // Without a hold the wish "no" is reached: a failed release is moot.
+            publish(LidHold(held: false, pending: wanted, failure: wanted ? hold.failure : nil))
+        }
+        // A newer hold is untouched by a late report about an older connection.
+        if wanted, !held { enqueueStep() }
+    }
+
+    // MARK: - Private
+
+    private func publish(_ next: LidHold) {
+        hold = next
+        onChange?(next)
+    }
+
+    private func enqueueStep() {
+        let queued = shared.withLock { s -> Bool in
+            guard !s.stepQueued else { return false }
+            s.stepQueued = true
+            return true
+        }
+        guard queued else { return }
+        outstanding += 1
+        queue.async { [weak self, backend, shared] in
+            let result = Self.converge(backend: backend, shared: shared)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.finish(result) }
+            }
+        }
+    }
+
+    /// One step on the queue: reads the wish now and sends what reaches it, if anything.
+    private nonisolated static func converge(backend: PrivilegedBackend, shared: Shared) -> StepResult {
+        let (wanted, wish, held) = shared.withLock { s -> (Bool, UInt64, Bool) in
+            s.stepQueued = false
+            return (s.wanted, s.wish, s.heldGeneration != nil)
+        }
+        let status = backend.status()
+        if wanted {
+            if held { return StepResult(wish: wish, failure: nil) }
+            // Only a daemon verified for this registration is asked to take the hold.
+            guard status == .installed else { return StepResult(wish: wish, failure: LidHold.helperNotReady) }
+            do {
+                let generation = try backend.setSleepDisabled(true)
+                shared.withLock { s in
+                    let lost = s.lostGeneration.map { $0 >= generation } ?? false
+                    s.heldGeneration = lost ? nil : generation
+                }
+                return StepResult(wish: wish, failure: nil)
+            } catch {
+                return StepResult(wish: wish, failure: HelperError.message(for: error))
+            }
+        }
+        switch status {
+        case .notInstalled, .needsApproval, .unsigned:
+            // No daemon is registered (or allowed to run): nothing holds for this app.
+            shared.withLock { $0.heldGeneration = nil }
+            return StepResult(wish: wish, failure: nil)
+        case .installed, .checking, .error:
+            // Sent even with nothing held here: the daemon may still hold for an earlier
+            // request. A successful reply releases this app's hold.
+            do {
+                try backend.setSleepDisabled(false)
+                shared.withLock { $0.heldGeneration = nil }
+                return StepResult(wish: wish, failure: nil)
+            } catch {
+                return StepResult(wish: wish, failure: HelperError.message(for: error))
+            }
+        }
+    }
+
+    private func finish(_ result: StepResult) {
+        outstanding -= 1
+        let (wanted, wish, held) = shared.withLock { ($0.wanted, $0.wish, $0.heldGeneration != nil) }
+        // An answer about an older wish: the step queued for the newer one reports its own.
+        let failure = result.wish == wish ? result.failure : nil
+        var next = LidHold(held: held, pending: wanted != held && failure == nil, failure: failure)
+        if outstanding == 0, wanted != held {
+            if failure == nil {
+                // The reply came over a connection that was lost meanwhile.
+                enqueueStep()
+            } else if failure == LidHold.helperNotReady, wanted, backend.status() == .installed {
+                // Verified while the refusal was on its way.
+                next.failure = nil
+                next.pending = true
+                enqueueStep()
+            }
+        }
+        publish(next)
     }
 }
