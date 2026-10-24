@@ -51,20 +51,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let clock = SystemClock()
         lidControl = lid
         var settingsStore: SettingsStore = UserDefaultsSettingsStore()
-        var resumeStore: ResumeStore? = UserDefaultsResumeStore()
         #if DEBUG
         // Design-review runs never turn closed-lid mode on through the real helper or touch the
         // user's settings: another Lidless may be running with lid mode on.
-        if args["DebugStartSession"] != nil || args["CapturePanelTo"] != nil {
+        let reviewRun = args["DebugStartSession"] != nil || args["CapturePanelTo"] != nil
+        if reviewRun {
             lidControl = PreviewLid()
             let store = PreviewStore()
             store.settings.lidModeEnabled = true
             settingsStore = store
-            resumeStore = nil
         }
+        #else
+        let reviewRun = false
         #endif
         // The session the previous copy saved before an update relaunched it: read and removed
-        // once, before any session can start.
+        // once, before any session can start (never in a design-review run).
+        let resumeStore: ResumeStore? = reviewRun ? nil : UserDefaultsResumeStore()
         let resumeSnapshot = resumeStore?.take()
         let controller = SessionController(
             assertions: IOPMSleepAssertionService(),

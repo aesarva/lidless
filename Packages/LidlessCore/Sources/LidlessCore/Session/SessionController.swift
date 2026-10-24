@@ -76,33 +76,38 @@ import os
     }
 
     /// Starts the session the previous copy saved before an update relaunched it, like `start`
-    /// (low battery stops it). Lid mode a safety rule suspended stays suspended for that reason,
-    /// until the user turns it on again. Lid mode that was on, on its way or waiting for the
-    /// helper waits for the helper again, keeping its original start time: it is wanted only
-    /// once the safety rules have judged it on readings taken by this copy (now if there are
-    /// some, else at the next ones). Otherwise lid mode is off.
+    /// (low battery stops it). Its ending-soon notice comes again: the previous copy's quit
+    /// cancelled it. Lid mode a safety rule suspended stays suspended for that reason (shown
+    /// again, not notified again), until the user turns it on again. Any other lid mode, with
+    /// the setting on, waits for the helper again, keeping its original start time: it is
+    /// wanted only once the safety rules have judged it on readings taken by this copy (now if
+    /// there are some, else at the next ones). With the setting off lid mode is off.
     @discardableResult
     public func resume(_ s: ResumeSnapshot) -> Bool {
         guard begin(startedAt: s.startedAt, endsAt: s.endsAt, keepDisplayOn: s.keepDisplayOn) else {
             return false
         }
+        if s.endsAt != nil { mutateSession { $0.endingSoonNotified = false } }
         guard settings.lidModeEnabled else { return true }
         if let reason = s.lidModeSuspendedReason, reason != .helperUnavailable {
             mutateSession {
                 $0.lidModeEnabledAt = s.lidModeEnabledAt
                 $0.lidModeSuspendedReason = reason
             }
-        } else if s.lidModeActive || s.lidModeSuspendedReason == .helperUnavailable {
-            // Not wanted yet (no `syncLidWanted`): the check below, or the next readings, comes first.
-            mutateSession {
-                $0.lidModeEnabledAt = s.lidModeEnabledAt
-                $0.lidModeSuspendedReason = .helperUnavailable
-            }
-            if readings != nil {
-                suspendBlockedLidWish()
-                retryHelperSuspendedLidMode()
-                syncLidWanted()
-            }
+            attention = reason
+            return true
+        }
+        // On, on its way, waiting for the helper, or caught between the wish and the service's
+        // first answer. Not wanted yet (no `syncLidWanted`): the check below, or the next
+        // readings, comes first.
+        mutateSession {
+            $0.lidModeEnabledAt = s.lidModeEnabledAt
+            $0.lidModeSuspendedReason = .helperUnavailable
+        }
+        if readings != nil {
+            suspendBlockedLidWish()
+            retryHelperSuspendedLidMode()
+            syncLidWanted()
         }
         return true
     }

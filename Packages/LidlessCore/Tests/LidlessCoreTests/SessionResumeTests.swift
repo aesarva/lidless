@@ -67,6 +67,9 @@ struct SessionResumeTests {
         #expect(lid.wanted.isEmpty)
         #expect(c.session?.lidModeSuspendedReason == .thermal)
         #expect(c.session?.lidModeActive == false)
+        // Shown again, not notified again.
+        #expect(c.attention == .thermal)
+        #expect(notifier.posted.isEmpty)
     }
 
     @Test func resumeReenablesLidModeThroughSafetyCheck() {
@@ -139,11 +142,68 @@ struct SessionResumeTests {
         #expect(c.session?.lidModeEnabledAt == t0 - 300)
     }
 
-    @Test func resumeWithoutLidModeLeavesItOff() {
-        #expect(c.resume(snapshot()))
-        c.update(readings: readings())
+    /// Saved between the wish and the service's first answer (neither on, on its way nor
+    /// suspended): treated as on its way, re-wanted only after the safety check.
+    @Test func resumeWithUnansweredLidWishWaitsForSafetyCheck() {
+        c.settings.lidModeEnabled = true
+        #expect(c.resume(snapshot(enabledAt: t0 - 300)))
         #expect(lid.wanted.isEmpty)
-        #expect(c.session?.lidModeSuspendedReason == nil)
+        #expect(lid.acquireCalls == 0)
+        #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+        #expect(c.session?.lidModeEnabledAt == t0 - 300)
+        c.update(readings: readings())
+        #expect(lid.acquireCalls == 1)
+        #expect(c.session?.lidModeActive == true)
+        #expect(c.session?.lidModeEnabledAt == t0 - 300)
+    }
+
+    @Test func resumeWithUnansweredLidWishBlockedBySafety() {
+        c.settings.lidModeEnabled = true
+        #expect(c.resume(snapshot(enabledAt: t0 - 300)))
+        c.update(readings: readings(thermal: .serious))
+        #expect(lid.acquireCalls == 0)
+        #expect(lid.wanted.isEmpty)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+    }
+
+    /// The real launch: readings at hand, the helper not verified yet. Wanted only after the
+    /// safety check on those readings; turned on by `helperDidChange`, keeping its start.
+    @Test func resumeAtLaunchWaitsForHelperThenTurnsOn() {
+        lid.status = .checking
+        c.settings.lidModeEnabled = true
+        c.update(readings: readings())
+        #expect(c.resume(snapshot(lidModeActive: true, enabledAt: t0 - 300)))
+        #expect(lid.acquireCalls == 0)
+        #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+        lid.status = .installed
+        c.helperDidChange()
+        #expect(lid.acquireCalls == 1)
+        #expect(c.session?.lidModeActive == true)
+        #expect(c.session?.lidModeEnabledAt == t0 - 300)
+    }
+
+    /// Readings that block arrive before the helper is verified: suspended for that reason,
+    /// and the helper's arrival does not turn it on.
+    @Test func resumeAtLaunchBlockedBeforeHelperArrives() {
+        lid.status = .checking
+        c.settings.lidModeEnabled = true
+        c.update(readings: readings())
+        #expect(c.resume(snapshot(lidModeActive: true, enabledAt: t0 - 300)))
+        c.update(readings: readings(thermal: .serious))
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        lid.status = .installed
+        c.helperDidChange()
+        #expect(lid.acquireCalls == 0)
+        #expect(c.session?.lidModeActive == false)
+        #expect(lid.wanted.last != true)
+    }
+
+    /// The previous copy's quit cancelled the ending-soon notice: it comes again, once.
+    @Test func resumeRepostsEndingSoon() {
+        #expect(c.resume(snapshot(endsAt: t0 + 120)))
+        c.tick()
+        c.tick()
+        #expect(notifier.posted == [.endingSoon(endsAt: t0 + 120)])
     }
 
     /// The setting was turned off meanwhile: the session comes back without lid mode.
