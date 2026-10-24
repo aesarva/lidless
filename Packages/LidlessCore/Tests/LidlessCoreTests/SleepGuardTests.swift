@@ -452,6 +452,36 @@ import Testing
         #expect(!store.exists())
     }
 
+    @Test func recoverAtStartWithZeroOnlyRemovesMarker() throws {
+        let (guardian, setting, store) = make(initial: false, file: true)
+        try guardian.recoverAtStart()
+        #expect(setting.writes.isEmpty)
+        #expect(!store.exists())
+    }
+
+    @Test func confirmedResetThenMarkerRemoveFailureDoesNotWriteAgain() throws {
+        let (guardian, setting, store) = make(initial: false)
+        try guardian.acquire(a)
+        store.failRemove = true
+        #expect(throws: FakeSleepSettingError.self) { try guardian.release(a) }
+        #expect(setting.writes == [true, false])
+        #expect(!guardian.ownsSetting)
+        store.failRemove = false
+        try guardian.retryPendingReset()
+        #expect(setting.writes == [true, false])
+        #expect(!store.exists())
+        #expect(guardian.isIdle)
+    }
+
+    @Test func ownsSettingFollowsMarker() throws {
+        let (guardian, _, _) = make(initial: false)
+        #expect(!guardian.ownsSetting)
+        try guardian.acquire(a)
+        #expect(guardian.ownsSetting)
+        try guardian.release(a)
+        #expect(!guardian.ownsSetting)
+    }
+
     @Test func recoverAtStartWithoutFileDoesNothing() throws {
         let (guardian, setting, _) = make(initial: true)
         try guardian.recoverAtStart()
@@ -557,5 +587,20 @@ import Testing
         try store.remove()
         #expect(!store.exists())
         try store.remove()
+    }
+
+    /// Only "no such file" is absence; a path that cannot be checked is not.
+    @Test func knownAbsentOnlyWhenTheFileIsMissing() throws {
+        let url = tempURL()
+        let root = url.deletingLastPathComponent().deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = FileOwnershipStore(url: url)
+        #expect(store.isKnownAbsent())
+        try store.create()
+        #expect(!store.isKnownAbsent())
+        // A regular file in place of the directory: the check fails with ENOTDIR.
+        let blocked = url.deletingLastPathComponent().appendingPathComponent("file")
+        try Data().write(to: blocked)
+        #expect(!FileOwnershipStore(url: blocked.appendingPathComponent("sleep-owned")).isKnownAbsent())
     }
 }

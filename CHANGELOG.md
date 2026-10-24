@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 — Unreleased
+
+- Lidless now updates itself: it reads a small feed on GitHub once a day, and when a new version is out the panel shows "Version X available" with a blue dot on the menu-bar icon. One press on Install and Relaunch downloads it, checks its signature and relaunches Lidless. Switch the daily check off in Settings → General → Check for updates automatically.
+- A session on air carries over an update: after the restart it continues with the same end time, display choice and closed-lid mode.
+- Settings → Helper → Remove now waits until the helper confirms that normal sleep is back; if it can't, the helper stays registered and says so.
+- Helper calls no longer block the menu: turning closed-lid mode off while the helper is slow or in trouble leaves the panel responsive.
+- A new build registers its helper again when it finds the old one still running or answering with another build number, so a changed helper is picked up even when the version number stays the same.
+- Settings → Helper shows the running daemon's version and build.
+- Settings is a native macOS window with toolbar tabs.
+- Unsigned builds no longer show a warning at every session about closed-lid mode needing a signed build.
+
 ## 0.3.0 — 2026-10-24
 
 - The privileged helper is now a daemon registered through `SMAppService`: approve it once in System Settings → General → Login Items & Extensions, with no administrator password and no sudoers rule.

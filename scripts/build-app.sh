@@ -13,7 +13,7 @@ fi
 
 ARCHS="${ARCHS:-arm64 x86_64}"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
-# Номер сборки растёт с каждым коммитом — macOS сравнивает версии по нему.
+# Номер сборки растёт с каждым коммитом — macOS и Sparkle сравнивают версии по нему.
 BUILD_NUMBER="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 
 XCODE_ARGS=(
@@ -32,10 +32,18 @@ rm -rf "$APP"
 ditto build/DerivedData/Build/Products/Release/Lidless.app "$APP"
 
 # Переподписываем готовый бандл нужным сертификатом. Hardened runtime обязателен
-# для нотаризации; включаем его и в ad-hoc сборке, чтобы локально проверять
-# то же поведение, что получат пользователи.
-SIGN_FLAGS=(--force --options runtime --sign "$SIGN_IDENTITY")
-if [ "$SIGN_IDENTITY" != "-" ]; then SIGN_FLAGS+=(--timestamp); fi
+# для нотаризации, но только с Developer ID: у ad-hoc подписи нет Team ID, и
+# library validation не даёт загрузить Sparkle.framework («different Team IDs»).
+SIGN_FLAGS=(--force --sign "$SIGN_IDENTITY")
+if [ "$SIGN_IDENTITY" != "-" ]; then SIGN_FLAGS+=(--options runtime --timestamp); fi
+# Вложенный код Sparkle — изнутри наружу; порядок и --preserve-metadata у
+# Downloader.xpc — из документации Sparkle.
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
+codesign "${SIGN_FLAGS[@]}" "$SPARKLE/XPCServices/Installer.xpc"
+codesign "${SIGN_FLAGS[@]}" --preserve-metadata=entitlements "$SPARKLE/XPCServices/Downloader.xpc"
+codesign "${SIGN_FLAGS[@]}" "$SPARKLE/Autoupdate"
+codesign "${SIGN_FLAGS[@]}" "$SPARKLE/Updater.app"
+codesign "${SIGN_FLAGS[@]}" "$APP/Contents/Frameworks/Sparkle.framework"
 # Вложенный демон подписываем отдельно и до приложения (без --deep): со своим
 # идентификатором, который приложение требует от собеседника по XPC.
 codesign "${SIGN_FLAGS[@]}" --identifier io.github.aesarva.Lidless.helper "$APP/Contents/MacOS/LidlessHelper"

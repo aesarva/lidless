@@ -3,7 +3,8 @@ import LidlessCore
 
 /// Draws the "pulse" icon set. Geometry is ported from the 24x24 SVG symbols
 /// (p0, p1, ptimer, plid, pwarn); drawing uses a flipped (y-down) context so
-/// SVG coordinates map one-to-one.
+/// SVG coordinates map one-to-one. An available update adds a dot in the system accent colour;
+/// the orange attention dot wins over it (StatusPresentation drops the update dot then).
 ///
 /// Deliberately nonisolated: AppKit may invoke the NSImage drawing handler on any
 /// thread, so everything the handler touches must be free of actor isolation.
@@ -15,6 +16,7 @@ enum IconRenderer {
     private static let warnColor = NSColor(srgbRed: 1, green: 0x9F / 255, blue: 0x0A / 255, alpha: 1)
     private static let onAir = NSColor(srgbRed: 0xE0 / 255, green: 0x34 / 255, blue: 0x2A / 255, alpha: 1)
     private static let onAirSpent = NSColor(srgbRed: 0x6E / 255, green: 0x1A / 255, blue: 0x15 / 255, alpha: 1)
+    private static let lampDot = NSPoint(x: 21.5, y: 2.5)
 
     static func image(for p: StatusPresentation) -> NSImage {
         switch p.glyph {
@@ -33,7 +35,8 @@ enum IconRenderer {
                 draw(p)
                 return true
             }
-            image.isTemplate = p.glyph != .attention
+            // A coloured dot makes the whole image non-template, as the lamp already is.
+            image.isTemplate = p.glyph != .attention && !p.updateDot
             return image
         }
     }
@@ -42,6 +45,14 @@ enum IconRenderer {
     /// is the remaining fraction (the light burns down); in lid mode a horizon line sits below.
     private static func drawLamp(_ p: StatusPresentation) {
         let lid = p.glyph == .lid
+        if p.updateDot {
+            // The dot sits on the lamp's top-right corner; a clear ring keeps it apart from the red.
+            NSGraphicsContext.saveGraphicsState()
+            let clip = NSBezierPath(rect: NSRect(origin: .zero, size: lampSize))
+            clip.append(dot(at: lampDot, radius: 3.6))
+            clip.windingRule = .evenOdd
+            clip.addClip()
+        }
         let lamp = NSRect(x: 1, y: lid ? 1.5 : 3, width: 22, height: lid ? 11 : 12)
         let shape = NSBezierPath(roundedRect: lamp, xRadius: 3, yRadius: 3)
         if p.glyph == .timer || (lid && p.progress != nil) {
@@ -65,11 +76,24 @@ enum IconRenderer {
             NSColor.labelColor.setStroke()
             stroke(poly([(3, 16), (21, 16)]), width: 1.6)
         }
+        if p.updateDot {
+            NSGraphicsContext.restoreGraphicsState()
+            NSColor.controlAccentColor.setFill()
+            dot(at: lampDot, radius: 2.5).fill()
+        }
     }
 
     private static func draw(_ p: StatusPresentation) {
         let ink = NSColor.labelColor
         switch p.glyph {
+        case .off where p.updateDot:
+            // The flat line steps aside for the dot, where the attention glyph has its orange one.
+            ink.withAlphaComponent(0.9).setStroke()
+            stroke(poly([(2.5, 12), (16.5, 12)]), width: 1.9)
+            ink.setFill()
+            dot(at: NSPoint(x: 9.5, y: 12), radius: 1.6).fill()
+            NSColor.controlAccentColor.setFill()
+            dot(at: NSPoint(x: 19.5, y: 6), radius: 3.6).fill()
         case .off:
             ink.withAlphaComponent(0.9).setStroke()
             stroke(poly([(2.5, 12), (21.5, 12)]), width: 1.9)
@@ -95,6 +119,10 @@ enum IconRenderer {
             warnColor.setFill()
             NSBezierPath(ovalIn: NSRect(x: 19.5 - 3.6, y: 6 - 3.6, width: 7.2, height: 7.2)).fill()
         }
+    }
+
+    private static func dot(at center: NSPoint, radius r: CGFloat) -> NSBezierPath {
+        NSBezierPath(ovalIn: NSRect(x: center.x - r, y: center.y - r, width: 2 * r, height: 2 * r))
     }
 
     private static func poly(_ pts: [(CGFloat, CGFloat)]) -> NSBezierPath {

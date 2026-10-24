@@ -30,18 +30,19 @@ import os
 }
 
 /// The app side of the helper's life: notices the status turning `.installed`, polls while
-/// macOS waits for the user's approval, and notices the 0.2.0 helper going away. The daemon
-/// removes the 0.2.0 helper itself when it starts; this only falls back to asking it once
-/// per launch if the files are still there.
+/// macOS waits for the user's approval or the daemon is being checked, and notices the 0.2.0
+/// helper going away. The daemon removes the 0.2.0 helper itself when it starts; this only
+/// falls back to asking it once per launch if the files are still there.
 @MainActor public final class HelperCoordinator {
     public private(set) var status: HelperStatus
     /// The 0.2.0 helper was present earlier in this launch and is gone now (whoever removed it).
     public private(set) var legacyRemoved = false
     /// Why the fallback removal failed; the daemon tries again when it next starts.
     public private(set) var legacyError: String?
-    /// The status turned `.installed` (once per transition).
+    /// The status turned `.installed` from any other, `.checking` included (once per transition).
     public var onBecameInstalled: (() -> Void)?
-    /// Any of `status`, `legacyRemoved`, `legacyError` changed.
+    /// Any of `status`, `legacyRemoved`, `legacyError` changed, or a refresh finished (the
+    /// daemon's answer, `PrivilegedBackend.lastInfo()`, may be new).
     public var onChange: (() -> Void)?
     public var isPolling: Bool { poll != nil }
 
@@ -81,7 +82,7 @@ import os
         let backend = self.backend
         let task = Task {
             await Task.detached { backend.refreshInfo() }.value
-            update()
+            update(refreshed: true)
             await startFallbackIfNeeded()?.value
             await transitionTask?.value
             refreshTask = nil
@@ -90,10 +91,10 @@ import os
         return task
     }
 
-    private func update() {
+    private func update(refreshed: Bool = false) {
         let current = backend.status()
         let becameInstalled = current == .installed && status != .installed
-        var changed = checkLegacy()
+        var changed = checkLegacy() || refreshed
         if current != status {
             status = current
             changed = true
@@ -115,9 +116,10 @@ import os
     }
 
     /// Polls while macOS waits for the user's approval: a menu-bar app is not told when they
-    /// allow it, and lid mode should turn on right then.
+    /// allow it, and lid mode should turn on right then. Also while the daemon is being
+    /// checked: a refresh that began before an install does not settle it.
     private func updatePolling() {
-        guard status == .needsApproval else {
+        guard status == .needsApproval || status == .checking else {
             poll?.cancel()
             poll = nil
             return

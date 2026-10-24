@@ -33,7 +33,7 @@
   <img src="docs/images/panel-off.png" width="300" alt="Lidless panel off air, the sign is dark">
 </p>
 
-> **New in 0.3.0:** closed-lid mode no longer asks for an administrator password. Approve the helper once in System Settings and you're done. Upgrading from 0.2.0 removes the old helper automatically.
+> **New in 0.4.0:** Lidless updates itself. A new version shows up in the panel with a blue dot on the icon, and one press installs it. A session on air carries on after the restart, closed-lid mode included.
 
 ---
 
@@ -46,7 +46,7 @@ Most keep-awake utilities stop at "don't sleep while the lid is open". Lidless i
 - **Never leaves your Mac broken.** Quit, crash, force-quit or reboot: normal sleep always comes back. A sleep setting you changed yourself is never touched.
 - **One press.** The ON AIR sign *is* the button. It counts down a timed session or counts up time on air.
 - **Legible at a glance.** On air, the menu-bar icon is a small lit red lamp that burns down with a timer. An orange dot means something needs you.
-- **Native and private.** SwiftUI + AppKit, universal binary, no network access, no analytics, no accounts.
+- **Native and private.** SwiftUI + AppKit, universal binary, one small update check a day, no analytics, no accounts.
 
 ## Install
 
@@ -77,6 +77,7 @@ Esc or another click on the icon closes the panel; right-click the icon for a qu
 | **Notifications** | A heads-up 5 minutes before a timed session ends, with **+30 min** and **+1 h**; a note when a safety rule stops or pauses something. |
 | **Menu-bar icon** | A quiet line when off, a lit lamp on air, optional remaining time next to it. |
 | **Settings** | Launch at login, default length, presets, menu-bar timer, start at launch, safety thresholds, the helper, and the interface language. |
+| **Updates** | Once a day Lidless reads a feed on GitHub. A new version appears in the panel and as a blue dot on the icon; one press installs it and restarts. A session on air continues after the update. Can be switched off in Settings → General. |
 | **Languages** | English and Russian, switchable in Settings → General → Language, independent of the system language. |
 
 ### Menu-bar icon
@@ -155,7 +156,10 @@ The App Store doesn't allow privileged helpers, and closed-lid mode needs one. R
 That's what the safety rules are for: closed-lid mode pauses at serious thermal pressure, the session stops when the Mac is critically hot with the lid closed, and a time limit caps closed-lid time on battery.
 
 **Does Lidless send any data?**
-No. It makes no network requests, collects no analytics and needs no account. Battery, power source, heat and the lid sensor are read locally for the safety rules.
+Almost nothing. The only network request is one read of the update feed from GitHub a day. It carries no system data, and release notes are not downloaded. You can switch it off in Settings. There is no analytics and no account. Battery, power source, heat and the lid sensor are read locally for the safety rules.
+
+**How do I update?**
+From 0.4.0 on it is automatic: the panel shows the new version and one press installs it. Lidless 0.3.0 has no updater, so download 0.4.0 once by hand; after that you are covered.
 
 ## Build from source
 

@@ -13,7 +13,13 @@ struct HelperTab: View {
                     switch helper.status {
                     case .notInstalled: Text("Not set up")
                     case .needsApproval: Text("Waiting for approval")
-                    case .installed: Text("Running, version \(Bundle.main.shortVersion)")
+                    case .checking: Text("Checking…")
+                    case .installed:
+                        if let info = helper.daemonInfo {
+                            Text("Running — version \(info.version) (build \(info.build))")
+                        } else {
+                            Text("Running, version \(Bundle.main.shortVersion)")
+                        }
                     case .unsigned: Text("Needs a signed build")
                     case .error(let message): Text("Error: \(message)").foregroundStyle(.red)
                     }
@@ -26,7 +32,7 @@ struct HelperTab: View {
                         // HelperModel.onBecameInstalled tells the controller once it is allowed.
                         run { await helper.install() }
                     }
-                    .disabled([HelperStatus.installed, .needsApproval, .unsigned].contains(helper.status))
+                    .disabled([HelperStatus.installed, .checking, .needsApproval, .unsigned].contains(helper.status))
                     Button("Remove") { remove() }
                         .disabled(helper.status == .notInstalled || helper.status == .unsigned)
                     if helper.isWorking { ProgressView().controlSize(.small) }
@@ -52,26 +58,38 @@ struct HelperTab: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Turns lid mode off while the helper can still do it; the setting stays off, so nothing
-    /// turns it back on while the removal runs. If the removal fails, lid mode comes back as
-    /// it was, through the safety-checked retry.
+    /// Turns lid mode off while the helper can still do it, and removes the helper only once
+    /// the daemon has confirmed that normal sleep is back; until the removal ends lid mode
+    /// cannot be taken again. If the release is not confirmed or the removal fails, lid mode
+    /// comes back as it was, through the safety check.
     private func remove() {
-        let point = controller.beginHelperRemoval()
-        run({ await helper.uninstall() },
-            onSuccess: { controller.helperDidChange() },
-            onFailure: { controller.restoreAfterFailedRemoval(point) })
-    }
-
-    private func run(_ work: @escaping () async -> HelperError?,
-                     onSuccess: @escaping () -> Void = {}, onFailure: @escaping () -> Void = {}) {
         errorText = nil
-        Task {
-            guard let error = await work() else {
-                onSuccess()
+        helper.beginRemoval()
+        controller.beginHelperRemoval { point, released in
+            guard released else {
+                errorText = String(localized: "Couldn't restore normal sleep — the helper was not removed.")
+                controller.restoreAfterFailedRemoval(point)
+                controller.endHelperRemoval()
+                helper.endRemoval()
                 return
             }
-            errorText = error.message
-            onFailure()
+            Task {
+                if let error = await helper.uninstall() {
+                    errorText = error.message
+                    controller.restoreAfterFailedRemoval(point)
+                } else {
+                    controller.helperDidChange()
+                }
+                controller.endHelperRemoval()
+                helper.endRemoval()
+            }
+        }
+    }
+
+    private func run(_ work: @escaping () async -> HelperError?) {
+        errorText = nil
+        Task {
+            if let error = await work() { errorText = error.message }
         }
     }
 }

@@ -41,6 +41,24 @@ struct StatusPresentationTests {
         #expect(glyph(.off, attention: .lowBattery) == .attention)
     }
 
+    @Test func updateDotGivesWayToAttention() {
+        func dot(_ state: SessionState, attention: SafetyReason? = nil, update: Bool) -> StatusPresentation {
+            StatusPresentation.make(state: state, attention: attention, updateAvailable: update,
+                                    showTimerText: false, now: t0)
+        }
+        let lid = SessionState.active(Session(startedAt: t0, lidModeActive: true))
+        #expect(dot(.off, update: true).updateDot)
+        #expect(dot(.off, update: true).glyph == .off)
+        // On air the lamp stays: the dot sits on it.
+        #expect(dot(lid, update: true).glyph == .lid)
+        #expect(dot(lid, update: true).updateDot)
+        #expect(!dot(.off, update: false).updateDot)
+        // Both wanted: only the orange one is drawn.
+        #expect(!dot(.off, attention: .lowBattery, update: true).updateDot)
+        #expect(dot(.off, attention: .lowBattery, update: true).glyph == .attention)
+        #expect(!dot(lid, attention: .thermal, update: true).updateDot)
+    }
+
     @Test func progressAndText() {
         let s = SessionState.active(Session(startedAt: t0, endsAt: t0 + 3600))
         let now = t0 + 900

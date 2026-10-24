@@ -25,7 +25,7 @@ private final class ReplyBox: @unchecked Sendable {
         let guardian = SleepGuard(setting: setting, store: store)
         let connection = HelperConnection(
             holder: holder, guard: guardian, cleaner: LegacyHelperCleaner(runner: FakeCommandRunner()),
-            version: "1.0", setting: setting
+            version: "1.0", build: "42", setting: setting
         )
         return (connection, guardian, setting)
     }
@@ -104,11 +104,23 @@ private final class ReplyBox: @unchecked Sendable {
         let (connection, _, setting) = make()
         setting.failRead = true
         let result = ReplyBox()
-        connection.info { version, _, error in
+        connection.info { version, _, _, _, error in
             #expect(version == "1.0")
             result.set(error)
         }
         #expect(result.reply != .some(nil))
+    }
+
+    @Test func infoRepliesBuildAndOwned() throws {
+        let (connection, guardian, _) = make()
+        let before = ReplyBox()
+        connection.info { _, build, _, owned, _ in before.set("\(build) \(owned)") }
+        #expect(before.reply == .some("42 false"))
+        try guardian.acquire(holder)
+        let after = ReplyBox()
+        connection.info { _, build, _, owned, _ in after.set("\(build) \(owned)") }
+        #expect(after.reply == .some("42 true"))
+        #expect(guardian.ownsSetting)
     }
 
     @Test func cleanupRefusedWhileHeld() {

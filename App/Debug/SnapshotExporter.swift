@@ -3,8 +3,9 @@ import AppKit
 import LidlessCore
 import SwiftUI
 
-/// Debug aid: `-SnapshotDir <path>` renders every popover state, each settings tab and the
-/// menu-bar glyphs to PNGs in light and dark, without Screen Recording access, then quits.
+/// Debug aid: `-SnapshotDir <path>` renders every popover state (each update row among them),
+/// each settings tab (and the real window per tab) and the menu-bar glyphs to PNGs in light and dark, without Screen Recording
+/// access, then quits. The language is the launch's own (`-AppleLanguages "(ru)"`).
 @MainActor
 enum SnapshotExporter {
     static func export(to directory: String) {
@@ -21,34 +22,70 @@ enum SnapshotExporter {
                 migrated.previewLegacy(removed: true)
                 let legacyFailed = HelperModel(backend: PreviewBackend(.installed))
                 legacyFailed.previewLegacy(removed: false, error: "cannot unlink /etc/sudoers.d/lidless: Operation not permitted")
-                for (name, tab, helper) in [
-                    ("general", SettingsTab.general, HelperModel(backend: PreviewBackend(.installed))),
-                    ("safety", .safety, HelperModel(backend: PreviewBackend(.installed))),
-                    ("helper", .helper, migrated),
-                    ("helper-needs-approval", .helper, HelperModel(backend: PreviewBackend(.needsApproval))),
-                    ("helper-unsigned", .helper, HelperModel(backend: PreviewBackend(.unsigned))),
-                    ("helper-legacy-error", .helper, legacyFailed),
-                    ("about", .about, HelperModel(backend: PreviewBackend(.installed))),
+                let installed = { HelperModel(backend: PreviewBackend(.installed)) }
+                for (name, tab, helper, updates) in [
+                    ("general", SettingsTab.general, installed(), UpdateState.upToDate),
+                    ("general-update-failed", .general, installed(), .failed(message: sampleUpdateError)),
+                    ("safety", .safety, installed(), .idle),
+                    ("helper", .helper, migrated, .idle),
+                    ("helper-needs-approval", .helper, HelperModel(backend: PreviewBackend(.needsApproval)), .idle),
+                    ("helper-unsigned", .helper, HelperModel(backend: PreviewBackend(.unsigned)), .idle),
+                    ("helper-legacy-error", .helper, legacyFailed, .idle),
+                    ("about", .about, installed(), .idle),
                 ] {
-                    let nav = SettingsNavigation()
-                    nav.tab = tab
-                    let view = SettingsView(controller: previewController(readings: previewReadings()),
-                                            helper: helper, loginItem: LoginItem(), navigation: nav)
+                    let view = tab
+                        .content(controller: previewController(readings: previewReadings()), helper: helper,
+                                 loginItem: LoginItem(), updates: PreviewUpdates(updates))
+                        .fittedForm()
+                        .frame(width: 420)
                         .background(Color(nsColor: .windowBackgroundColor))
                     snapshot(view, appearance: appearance,
                              to: dir.appendingPathComponent("settings-\(name)-\(suffix).png"))
                 }
-                snapshot(menuBarStrip(), appearance: appearance,
+                snapshot(menuBarStrip(updateAvailable: false), appearance: appearance,
                          to: dir.appendingPathComponent("menubar-\(suffix).png"))
+                snapshot(menuBarStrip(updateAvailable: true), appearance: appearance,
+                         to: dir.appendingPathComponent("menubar-update-\(suffix).png"))
             }
         }
     }
 
-    private static func popoverStates() -> [(String, AnyView)] {
-        func view(_ c: SessionController, helper: HelperStatus = .installed) -> AnyView {
-            AnyView(PopoverView(controller: c, helper: HelperModel(backend: PreviewBackend(helper)),
-                                openSettings: { _ in }))
+    /// The real settings window per tab, toolbar included, in light and dark. Windows need the run
+    /// loop to lay out, so this is async and runs after `export`.
+    static func exportWindows(to directory: String) async {
+        let dir = URL(fileURLWithPath: directory, isDirectory: true)
+        let controller = SettingsWindowController(
+            controller: previewController(readings: previewReadings()),
+            helper: HelperModel(backend: PreviewBackend(.installed)), updates: PreviewUpdates(.upToDate))
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            await controller.exportSnapshots(to: dir, appearance: appearance,
+                                             suffix: appearance == .aqua ? "light" : "dark")
         }
+    }
+
+    /// Long enough to wrap: Sparkle's messages are whole sentences.
+    private static let sampleUpdateError = "The update is improperly signed and could not be validated. Please try again later or contact the app developer."
+
+    private static func popoverStates() -> [(String, AnyView)] {
+        func view(_ c: SessionController, helper: HelperStatus = .installed, updates: UpdateState = .idle) -> AnyView {
+            AnyView(PopoverView(controller: c, helper: HelperModel(backend: PreviewBackend(helper)),
+                                updates: PreviewUpdates(updates), openSettings: { _ in }))
+        }
+        let notes = URL(string: "https://github.com/aesarva/lidless/releases/tag/v0.4.1")
+        let updateStates: [(String, UpdateState)] = [
+            ("available", .available(version: "0.4.1", notesURL: notes)),
+            ("available-no-notes", .available(version: "0.4.1", notesURL: nil)),
+            ("downloading", .downloading(version: "0.4.1", progress: 0.42)),
+            ("downloading-unknown", .downloading(version: "0.4.1", progress: nil)),
+            ("installing", .installing(version: "0.4.1")),
+            ("waiting-for-lid", .waitingForLid(version: "0.4.1")),
+            ("failed", .failed(message: sampleUpdateError)),
+            ("checking", .checking),
+            ("needs-move", .needsMove),
+            ("up-to-date", .upToDate),
+        ]
+        let onAir = previewController(lid: true, readings: previewReadings())
+        onAir.start(.minutes(60))
         let off = previewController(readings: previewReadings())
         let indefinite = previewController(readings: previewReadings())
         indefinite.start(.indefinite)
@@ -70,7 +107,10 @@ enum SnapshotExporter {
             ("unsigned", view(previewController(readings: previewReadings()), helper: .unsigned)),
             ("helper-error", view(previewController(lid: true, readings: previewReadings()),
                                   helper: .error("helper version 0.2.9 does not match Lidless 0.3.0"))),
-        ]
+            ("update-available-on-air", view(onAir, updates: .available(version: "0.4.1", notesURL: notes))),
+        ] + updateStates.map { name, state in
+            ("update-\(name)", view(previewController(readings: previewReadings()), updates: state))
+        }
     }
 
     /// The panel as PanelController frames it, over a wallpaper-like ground.
@@ -87,7 +127,9 @@ enum SnapshotExporter {
                                        startPoint: .topLeading, endPoint: .bottomTrailing))
     }
 
-    private static func menuBarStrip() -> some View {
+    /// Off, on air, timer, lid, then attention. With `updateAvailable` each wants the update dot
+    /// too; the attention glyph, wanting both dots, draws only the orange one.
+    private static func menuBarStrip(updateAvailable: Bool) -> some View {
         let now = Date()
         let states: [StatusPresentation] = {
             let off = previewController(readings: previewReadings())
@@ -95,13 +137,16 @@ enum SnapshotExporter {
             let timer = previewController(readings: previewReadings()); timer.start(.minutes(60))
             let lid = previewController(lid: true, readings: previewReadings()); lid.start(.minutes(60))
             return [off, on, timer, lid].map {
-                StatusPresentation.make(state: $0.state, attention: nil, showTimerText: true, now: now)
-            } + [StatusPresentation.make(state: .off, attention: .lowBattery, showTimerText: false, now: now)]
+                StatusPresentation.make(state: $0.state, attention: nil, updateAvailable: updateAvailable,
+                                        showTimerText: true, now: now)
+            } + [StatusPresentation.make(state: .off, attention: .lowBattery, updateAvailable: updateAvailable,
+                                         showTimerText: false, now: now)]
         }()
         return HStack(spacing: 18) {
             ForEach(Array(states.enumerated()), id: \.offset) { _, p in
                 HStack(spacing: 3) {
-                    Image(nsImage: IconRenderer.image(for: p)).renderingMode(p.glyph == .off ? .template : .original)
+                    Image(nsImage: IconRenderer.image(for: p))
+                        .renderingMode(p.glyph == .off && !p.updateDot ? .template : .original)
                     if let t = p.timerText { Text(t).font(.system(size: 13).monospacedDigit()) }
                 }
             }

@@ -31,9 +31,10 @@ Glanced at and clicked from the menu bar dozens of times a day, usually in passi
 - Closed-lid mode: separate toggle, effective only during a session; needs a one-time approval of the helper in System Settings → Login Items (no password) and a Developer ID–signed build. A `disablesleep` the user set themselves is never touched.
 - Safety: stop below a battery threshold (default 20%), pause lid mode when hot, stop when critically hot with the lid closed, pause lid mode after N hours closed on battery (default 4 h).
 - Menu-bar icon states: off, on air, on air with timer (the lamp burns down, optional countdown text), closed-lid mode, attention (a safety rule fired or the helper is unavailable).
-- Settings: General, Safety, Helper, About. Launch at login.
+- Settings: General, Safety, Helper, About (a native window with toolbar tabs). Launch at login.
 - Localization: English (source) and Russian, switchable in the app.
-- No network access, analytics or accounts.
+- Updates: Sparkle reads a feed on GitHub Releases once a day (no system data, no release notes downloaded; can be switched off in Settings). A new version shows as a row in the panel and a blue dot on the icon; one press installs and restarts, and a session on air carries over the update. Updates are signed (EdDSA) and Developer ID–verified.
+- The only network request is that daily update check. No analytics or accounts.
 - Not in the App Store (privileged helpers are not allowed there). Distributed as a Developer ID–signed, notarized DMG on GitHub Releases.
 - Planned later phases: automatic triggers, integrations (hotkey, URL scheme, CLI, Shortcuts), statistics and widgets.
 

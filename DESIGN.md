@@ -175,7 +175,7 @@ Title (13pt medium), 11pt detail, small native switch right. Tint is signal red 
 There is no session switch. The ON AIR sign is a full-width button: press it (or Return) to go on air, press it again to go off air. Hover lifts the light by 7% white, a press sinks it (scale 0.985, 18% black). Off air the caption under the time says to press the sign. A blocked start (low battery) leaves the sign dark and explains in amber. While lit, the sign carries the session's clock to the right of the lettering after a thin white rule, SF Pro semibold 21pt tabular ("M:SS", then "H:MM:SS"); the lettering steps down to 19pt to make room. A timed session counts down to its end; an indefinite one counts time on air. There is no separate headline number: under the sign sits one caption ("until 17:52 · lid can close", "on air since 16:40", or "Press the sign to go on air").
 
 ### Menu-bar Glyphs and App Icon
-Template "pulse" glyphs at 18pt (flat line, ECG pulse, pulse in progress ring, pulse over horizon, pulse with orange attention dot, the only coloured glyph). App icon: studio-black ground with a lit red light box carrying a warm-white pulse line and a thin cream rule (generated raster, provenance in docs/asset-provenance.md).
+Template "pulse" glyphs at 18pt (flat line, ECG pulse, pulse in progress ring, pulse over horizon, pulse with orange attention dot). The only coloured glyphs are the orange attention dot and the update dot: a small accent-blue dot (`controlAccentColor`), drawn non-template so it keeps its colour; when both apply, orange attention wins. App icon: studio-black ground with a lit red light box carrying a warm-white pulse line and a thin cream rule (generated raster, provenance in docs/asset-provenance.md).
 
 ## Do's and Don'ts
 

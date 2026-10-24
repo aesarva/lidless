@@ -9,16 +9,18 @@ final class Daemon: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
     private let sleepGuard: SleepGuard
     private let cleaner: LegacyHelperCleaner
     private let version: String
+    private let build: String
     private let lifecycle: HelperLifecycle
     /// nil when the daemon has no Team ID (ad-hoc build): every connection is refused.
     private let clientRequirement = CodeSigningRequirement.requirement(
         identifier: HelperIDs.app, teamID: CodeSigningRequirement.ownTeamID()
     )
 
-    init(guard sleepGuard: SleepGuard, cleaner: LegacyHelperCleaner, version: String, lifecycle: HelperLifecycle) {
+    init(guard sleepGuard: SleepGuard, cleaner: LegacyHelperCleaner, version: String, build: String, lifecycle: HelperLifecycle) {
         self.sleepGuard = sleepGuard
         self.cleaner = cleaner
         self.version = version
+        self.build = build
         self.lifecycle = lifecycle
     }
 
@@ -37,7 +39,7 @@ final class Daemon: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
         let holder = UUID()
         let lifecycle = lifecycle
         let exported = HelperConnection(
-            holder: holder, guard: sleepGuard, cleaner: cleaner, version: version,
+            holder: holder, guard: sleepGuard, cleaner: cleaner, version: version, build: build,
             onGuardChange: { lifecycle.reevaluate() }
         )
         connection.exportedInterface = NSXPCInterface(with: HelperProtocol.self)

@@ -1,36 +1,42 @@
 import SwiftUI
 import LidlessCore
 
-@MainActor @Observable
-final class SettingsNavigation {
-    var tab: SettingsTab = .general
+extension SettingsTab {
+    /// The toolbar label and the window title while the tab is selected.
+    var title: String {
+        switch self {
+        case .general: String(localized: "General")
+        case .safety: String(localized: "Safety")
+        case .helper: String(localized: "Helper")
+        case .about: String(localized: "About")
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: "gearshape"
+        case .safety: "shield"
+        case .helper: "wrench.and.screwdriver"
+        case .about: "info.circle"
+        }
+    }
+
+    /// The tab's content at the window's width, as tall as its content: the window follows it.
+    @MainActor @ViewBuilder
+    func content(controller: SessionController, helper: HelperModel, loginItem: LoginItem,
+                 updates: any UpdateSource) -> some View {
+        switch self {
+        case .general: GeneralTab(controller: controller, loginItem: loginItem, updates: updates)
+        case .safety: SafetyTab(controller: controller)
+        case .helper: HelperTab(controller: controller, helper: helper)
+        case .about: AboutTab(updates: updates)
+        }
+    }
 }
 
-extension SettingsTab: Hashable {}
-
-struct SettingsView: View {
-    let controller: SessionController
-    let helper: HelperModel
-    let loginItem: LoginItem
-    @Bindable var navigation: SettingsNavigation
-
-    var body: some View {
-        TabView(selection: $navigation.tab) {
-            GeneralTab(controller: controller, loginItem: loginItem)
-                .tabItem { Label("General", systemImage: "gearshape") }
-                .tag(SettingsTab.general)
-            SafetyTab(controller: controller)
-                .tabItem { Label("Safety", systemImage: "shield") }
-                .tag(SettingsTab.safety)
-            HelperTab(controller: controller, helper: helper)
-                .tabItem { Label("Helper", systemImage: "wrench.and.screwdriver") }
-                .tag(SettingsTab.helper)
-            AboutTab()
-                .tabItem { Label("About", systemImage: "info.circle") }
-                .tag(SettingsTab.about)
-        }
-        .padding(20)
-        .frame(width: 500)
-        .fixedSize(horizontal: false, vertical: true)
+extension View {
+    /// A form that takes its content's height instead of scrolling, so no tab is ever clipped.
+    func fittedForm() -> some View {
+        scrollDisabled(true).fixedSize(horizontal: false, vertical: true)
     }
 }

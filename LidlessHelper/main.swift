@@ -47,13 +47,14 @@ sigterm.setEventHandler {
 sigterm.resume()
 
 let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
 let lifecycle = HelperLifecycle(guard: sleepGuard, scheduler: DispatchHelperScheduler()) {
     exit(0)
 }
-let daemon = Daemon(guard: sleepGuard, cleaner: cleaner, version: version, lifecycle: lifecycle)
+let daemon = Daemon(guard: sleepGuard, cleaner: cleaner, version: version, build: build, lifecycle: lifecycle)
 let listener = NSXPCListener(machServiceName: HelperIDs.helper)
 listener.delegate = daemon
 listener.resume()
 lifecycle.reevaluate()
-log.notice("listening, version \(version, privacy: .public)")
+log.notice("listening, version \(version, privacy: .public) (\(build, privacy: .public))")
 dispatchMain()
