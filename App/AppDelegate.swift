@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lidControl: LidSleepControlling!
     private(set) var controller: SessionController!
     private(set) var engine: SafetyEngine!
+    private(set) var updates: UpdateController!
     private var statusItem: StatusItemController!
     private var settingsWindow: SettingsWindowController!
     private var notifier: UserNotifier!
@@ -16,9 +17,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         StudioFont.register()
-        #if DEBUG
-        // Debug args come only from the command line (argument domain), never from persisted defaults.
+        // Launch args (debug ones, and -UpdateFeedURL in every build) come only from the command
+        // line (argument domain), never from persisted defaults.
         let args = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        #if DEBUG
         if let dir = args["SnapshotDir"] as? String {
             SnapshotExporter.export(to: dir)
             NSApp.terminate(nil)
@@ -71,12 +73,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notifier.safetySettings = { [weak controller] in controller?.settings.safety ?? SafetySettings() }
         notifier.onExtend = { [weak controller] minutes in controller?.extend(byMinutes: minutes) }
 
+        // -UpdateFeedURL works in Release too: Sparkle checks the EdDSA and code signatures anyway.
+        let offerLifetime = (args["UpdateOfferLifetime"] as? String).flatMap(Double.init).map { Duration.seconds($0) }
+        let updates = UpdateController(
+            feedOverride: args["UpdateFeedURL"] as? String,
+            offerLifetime: offerLifetime ?? .seconds(24 * 60 * 60),
+            onShowPanel: { [weak self] in self?.statusItem?.openPanel() },
+            lidIsOpen: { [weak controller] in !(controller?.readings?.lidClosed ?? false) },
+            onWillRelaunch: {}
+        )
+        self.updates = updates
+
         engine = SafetyEngine(
             power: IOPowerMonitor(),
             thermal: SystemThermalMonitor(),
             lid: IORegistryLidMonitor(),
             clock: clock,
-            onReadings: { [weak controller] readings in controller?.update(readings: readings) }
+            onReadings: { [weak controller, weak updates] readings in
+                controller?.update(readings: readings)
+                // An install held while the lid was closed goes ahead once it opens.
+                if !readings.lidClosed { updates?.lidDidOpen() }
+            }
         )
 
         let helper = HelperModel(backend: backend, lidModeHeld: { [weak controller] in
@@ -101,6 +118,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.refresh()
         // Checks the daemon's version and build once at launch.
         helper.refresh()
+        // After the first readings: an install Sparkle resumes at once needs the lid state.
+        updates.start()
         #if DEBUG
         // -DebugStartSession YES -OpenPanelOnLaunch YES: live panel captures for design review.
         if (args["DebugStartSession"] as? String)?.lowercased() == "indefinite" {

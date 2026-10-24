@@ -29,7 +29,7 @@ Merge with `--no-ff` (or a pull request into `develop`) so each change stays vis
 make test      # Swift package tests, shellcheck, helper plist lint
 make build     # generate the Xcode project and build (Debug)
 make run       # build and launch the Debug app
-make app       # Release universal build (arm64 + x86_64), hardened runtime → build/Lidless.app
+make app       # Release universal build (arm64 + x86_64) → build/Lidless.app; hardened runtime with a Developer ID only
 make dmg       # make app + dist/Lidless-<VERSION>.dmg without a Developer ID
 ```
 
