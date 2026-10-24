@@ -2,7 +2,7 @@
 
 ## 0.4.0 — Unreleased
 
-- Lidless now updates itself: it reads a small feed on GitHub once a day, and when a new version is out the panel shows "Version X is available" with a blue dot on the menu-bar icon. One press on Install and Restart downloads it, checks its signature and relaunches Lidless. Switch the daily check off in Settings.
+- Lidless now updates itself: it reads a small feed on GitHub once a day, and when a new version is out the panel shows "Version X available" with a blue dot on the menu-bar icon. One press on Install and Relaunch downloads it, checks its signature and relaunches Lidless. Switch the daily check off in Settings → General → Check for updates automatically.
 - A session on air carries over an update: after the restart it continues with the same end time, display choice and closed-lid mode.
 - Settings → Helper → Remove now waits until the helper confirms that normal sleep is back; if it can't, the helper stays registered and says so.
 - Helper calls no longer block the menu: turning closed-lid mode off while the helper is slow or in trouble leaves the panel responsive.

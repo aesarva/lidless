@@ -57,6 +57,8 @@ if ! $UNSIGNED; then
 fi
 
 mkdir -p dist
+# Лента от прошлого запуска не должна пережить новую сборку той же версии.
+rm -f dist/appcast.xml
 DMG="dist/Lidless-$VERSION.dmg"
 STAGING="$(mktemp -d)"
 cp -R "$APP" "$STAGING/"
@@ -70,27 +72,25 @@ if ! $UNSIGNED; then
     notarize "$DMG"
     xcrun stapler staple "$DMG"
     echo "==> Проверка Gatekeeper"
-    spctl --assess --type execute --verbose "$APP"
-    spctl --assess --type open --context context:primary-signature --verbose "$DMG"
-fi
+    spctl --assess --type execute --verbose "$APP" || { echo "spctl не принял приложение." >&2; exit 1; }
+    spctl --assess --type open --context context:primary-signature --verbose "$DMG" \
+        || { echo "spctl не принял DMG." >&2; exit 1; }
 
-# Лента обновлений только для подписанного релиза. Sparkle сверяет EdDSA, а «только наша команда»
-# гарантирует этот шаг: приложение, демон и Sparkle должны быть подписаны Team ID разработчика.
-if ! $UNSIGNED; then
+    # Лента только для подписанного релиза. Sparkle сверяет EdDSA, а «только наша команда»
+    # гарантирует этот шаг: приложение, демон и Sparkle должны быть подписаны Team ID разработчика.
     TEAM_ID=6H45P75YYV
     echo "==> Проверка подписей перед лентой"
     for target in "$APP" "$APP/Contents/MacOS/LidlessHelper" "$APP/Contents/Frameworks/Sparkle.framework"; do
-        if ! codesign -dv "$target" 2>&1 | grep -q "^TeamIdentifier=$TEAM_ID\$"; then
+        SIG_INFO="$(codesign -dv "$target" 2>&1 || true)"
+        if ! grep -q "^TeamIdentifier=$TEAM_ID\$" <<<"$SIG_INFO"; then
             echo "$target не подписан Team ID $TEAM_ID — ленту не создаю." >&2
             exit 1
         fi
     done
-    spctl --assess --type execute "$APP" || { echo "spctl не принял приложение." >&2; exit 1; }
-    spctl --assess --type open --context context:primary-signature "$DMG" \
-        || { echo "spctl не принял DMG." >&2; exit 1; }
     echo "==> Лента обновлений"
     BUILD_NUMBER="$(git rev-list --count HEAD)"
-    scripts/make-appcast.sh "$DMG" "$VERSION" "$BUILD_NUMBER" > dist/appcast.xml
+    scripts/make-appcast.sh "$DMG" "$VERSION" "$BUILD_NUMBER" > dist/appcast.xml \
+        || { rm -f dist/appcast.xml; exit 1; }
     xmllint --noout dist/appcast.xml
 fi
 

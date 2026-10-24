@@ -82,7 +82,7 @@ generate_keys --account lidless
 generate_keys --account lidless -x lidless-sparkle-key.backup
 ```
 
-If the key is lost, installed copies can no longer accept updates, so keep the backup. `scripts/release.sh` refuses a signed release while `Info.plist` still holds the placeholder.
+Keep the backup: without the key you can't sign further updates. A lost EdDSA key can be rotated through Sparkle's [key rotation](https://sparkle-project.github.io/documentation/#rotating-signing-keys) as long as the Developer ID identity stays the same, but that is a detour worth avoiding. `scripts/release.sh` refuses a signed release while `Info.plist` still holds the placeholder.
 
 1. On `develop`: update `CHANGELOG.md`, the version in `project.yml` (`MARKETING_VERSION`, set once at the top for both the app and the helper) and the `VERSION` default in the `Makefile`.
 2. Build, sign, notarize and staple the app and the DMG, and check Gatekeeper:
@@ -116,7 +116,7 @@ These need a real MacBook and a Developer ID–signed build. Last passed in full
 7. `sudo pmset -a disablesleep 1` by hand, then turn closed-lid mode on and off: it stays 1.
 8. Upgrading from 0.2.0 on the same Mac: the sudoers file and watchdog are gone and the `app.lidless.watchdog` job is unloaded.
 9. Settings → Helper → Remove: the daemon is unregistered and `SleepDisabled 0`; with the helper unreachable, Remove leaves it registered and says so.
-10. Update check: serve build N+1 (signed DMG + `appcast.xml`) from `127.0.0.1` and run build N with `-UpdateFeedURL` and a closed-lid session on air. The panel shows the update row and the blue dot; Install and Restart relaunches into N+1 with no Sparkle windows; the session continues with the same end time and closed-lid mode, and Settings → Helper shows build N+1. A DMG with a corrupted signature is rejected ("Couldn't update"). Closing the lid during the download makes the install wait for the lid to open.
+10. Update check: serve build N+1 (signed DMG + `appcast.xml`) from `127.0.0.1` and run build N with `-UpdateFeedURL` and a closed-lid session on air. The panel shows the update row and the blue dot; Install and Relaunch relaunches into N+1 with no Sparkle windows; the session continues with the same end time and closed-lid mode, and Settings → Helper shows build N+1. A DMG with a corrupted signature is rejected ("Couldn't update"). Closing the lid during the download makes the install wait for the lid to open.
 11. An ad-hoc build (`make app` without a certificate) launches and loads Sparkle.
 
 A helper plist change only reaches launchd when the helper is registered again: bump the version, or use Settings → Helper → Remove and Set Up on a dev build.

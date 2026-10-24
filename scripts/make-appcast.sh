@@ -20,13 +20,17 @@ REPO=https://github.com/aesarva/lidless
 DOWNLOAD_BASE="${DOWNLOAD_BASE:-$REPO/releases/download/v$VERSION}"
 
 SIGN_UPDATE="${SIGN_UPDATE:-$(find build/DerivedData/SourcePackages/artifacts -type f \
-    -path '*/Sparkle/bin/sign_update' -not -path '*/old_dsa_scripts/*' 2>/dev/null | head -1)}"
+    -path '*/Sparkle/bin/sign_update' -not -path '*/old_dsa_scripts/*' 2>/dev/null | head -1 || true)}"
 if [ -z "$SIGN_UPDATE" ] || [ ! -x "$SIGN_UPDATE" ]; then
     echo "Нет sign_update: сначала make app (Sparkle подтягивается как SwiftPM-артефакт)." >&2
     exit 1
 fi
 # Печатает атрибуты sparkle:edSignature="…" length="…" для <enclosure>.
 SIG_ATTRS="$("$SIGN_UPDATE" --account lidless "$DMG")"
+if [ -z "$SIG_ATTRS" ]; then
+    echo "sign_update не вернул подпись для $DMG." >&2
+    exit 1
+fi
 
 PUB_DATE="$(LC_ALL=C date -u "+%a, %d %b %Y %H:%M:%S +0000")"
 

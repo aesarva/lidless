@@ -77,7 +77,7 @@ Esc or another click on the icon closes the panel; right-click the icon for a qu
 | **Notifications** | A heads-up 5 minutes before a timed session ends, with **+30 min** and **+1 h**; a note when a safety rule stops or pauses something. |
 | **Menu-bar icon** | A quiet line when off, a lit lamp on air, optional remaining time next to it. |
 | **Settings** | Launch at login, default length, presets, menu-bar timer, start at launch, safety thresholds, the helper, and the interface language. |
-| **Updates** | Once a day Lidless reads a feed on GitHub. A new version appears in the panel and as a blue dot on the icon; one press installs it and restarts. A session on air continues after the update. Can be switched off in Settings. |
+| **Updates** | Once a day Lidless reads a feed on GitHub. A new version appears in the panel and as a blue dot on the icon; one press installs it and restarts. A session on air continues after the update. Can be switched off in Settings → General. |
 | **Languages** | English and Russian, switchable in Settings → General → Language, independent of the system language. |
 
 ### Menu-bar icon
