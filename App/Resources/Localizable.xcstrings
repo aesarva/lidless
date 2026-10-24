@@ -14,6 +14,26 @@
         }
       }
     },
+    "%@ left": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "осталось %@"
+          }
+        }
+      }
+    },
+    "%@, update available": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, доступно обновление"
+          }
+        }
+      }
+    },
     "%lld h": {
       "localizations": {
         "ru": {
@@ -1007,6 +1027,16 @@
         }
       }
     },
+    "closed-lid mode": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "режим крышки"
+          }
+        }
+      }
+    },
     "closing the lid puts the Mac to sleep": {
       "localizations": {
         "ru": {
@@ -1070,6 +1100,16 @@
         }
       }
     },
+    "needs attention": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "нужно внимание"
+          }
+        }
+      }
+    },
     "no battery": {
       "localizations": {
         "ru": {
@@ -1086,6 +1126,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "норма"
+          }
+        }
+      }
+    },
+    "off air": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "не в эфире"
+          }
+        }
+      }
+    },
+    "on air": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "в эфире"
           }
         }
       }
@@ -1236,16 +1296,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "до %@"
-          }
-        }
-      }
-    },
-    "update available": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "доступно обновление"
           }
         }
       }

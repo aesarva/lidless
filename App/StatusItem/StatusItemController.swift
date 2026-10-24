@@ -44,8 +44,7 @@ final class StatusItemController {
             now: Date()
         )
         guard let button = item.button else { return }
-        // Said even when the orange dot is the one drawn: the update is there all the same.
-        let spoken = updates.showsBadge ? "Lidless, " + String(localized: "update available") : nil
+        let spoken = spokenLabel(presentation)
         if spoken != lastSpokenLabel {
             lastSpokenLabel = spoken
             button.setAccessibilityLabel(spoken)
@@ -63,6 +62,19 @@ final class StatusItemController {
             button.title = ""
             button.imagePosition = .imageOnly
         }
+    }
+
+    /// What VoiceOver says for the icon: what it shows, in words (the timer text as drawn),
+    /// then an available update, said even when the orange dot is the one drawn: the update is
+    /// there all the same.
+    private func spokenLabel(_ p: StatusPresentation) -> String {
+        let session = controller.session
+        var parts = ["Lidless", session != nil ? String(localized: "on air") : String(localized: "off air")]
+        if let text = p.timerText { parts.append(String(localized: "\(text) left")) }
+        if session?.lidModeActive == true { parts.append(String(localized: "closed-lid mode")) }
+        if p.glyph == .attention { parts.append(String(localized: "needs attention")) }
+        let base = parts.joined(separator: ", ")
+        return updates.showsBadge ? String(localized: "\(base), update available") : base
     }
 
     @objc private func clicked() {
