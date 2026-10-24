@@ -261,12 +261,15 @@ import os
     /// is ignored.
     public func helperConnectionLost(generation: UInt64) {
         let wasActive = session?.lidModeActive == true
-        lid.connectionLost(generation: generation)
-        guard wasActive, let s = session, !s.lidModeActive else { return }
-        if let reason = safetyBlock(s) {
+        if wasActive, let s = session, let reason = safetyBlock(s) {
+            // The rules would suspend held lid mode now anyway: unwanted before the service
+            // hears of the loss, so it never takes the hold again.
             suspendLidMode(reason)
+            lid.connectionLost(generation: generation)
             return
         }
+        lid.connectionLost(generation: generation)
+        guard wasActive, let s = session, !s.lidModeActive else { return }
         let status = lid.helperStatus()
         switch status {
         case .installed:
@@ -357,6 +360,9 @@ import os
                     if active { $0.lidModeSuspendedReason = nil }
                 }
             }
+            // Held for this app again: a reset pending from an earlier release is moot (a later
+            // failed release sets it again).
+            if active { recoveryPending = false }
             // Taken with the lid already closed: dark now, not at the next close.
             if active, !s.lidModeActive, readings?.lidClosed == true, let current = session {
                 darkenForClosedLid(current)
@@ -402,7 +408,11 @@ import os
             confirmInFlight = false
             guard released, !lidWanted else { return }
             recoveryPending = false
-            if attention == .helperUnavailable { attention = nil }
+            // A safety suspension that still holds shows again.
+            if attention == .helperUnavailable {
+                let reason = session?.lidModeSuspendedReason
+                attention = reason == .helperUnavailable ? nil : reason
+            }
         }
     }
 

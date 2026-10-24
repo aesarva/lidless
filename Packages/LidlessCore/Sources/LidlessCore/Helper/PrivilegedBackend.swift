@@ -36,6 +36,9 @@ public extension HelperError {
         }
     }
 
+    /// Taking the hold was refused: the daemon is not verified for the current registration.
+    static let notReady = HelperError.commandFailed("helper not ready")
+
     /// `message` for a `HelperError`, the plain description for anything else.
     static func message(for error: Error) -> String {
         (error as? HelperError)?.message ?? String(describing: error)
@@ -56,6 +59,9 @@ public protocol PrivilegedBackend: Sendable {
     func install() throws
     func uninstall() throws
     /// Returns the generation of the daemon connection that carried the call (see `HelperClient`).
+    /// Taking the hold (`true`) goes only to a daemon verified for the current registration
+    /// (`status()` is `.installed`), otherwise throws `HelperError.notReady`; releasing goes
+    /// to whatever answers.
     @discardableResult func setSleepDisabled(_ disabled: Bool) throws -> UInt64
     func isSleepDisabled() throws -> Bool
     /// Whether any file of the 0.2.0 sudoers helper is still installed.

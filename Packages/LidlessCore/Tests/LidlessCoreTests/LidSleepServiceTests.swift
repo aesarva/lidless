@@ -27,6 +27,16 @@ struct LidSleepServiceTests {
         #expect(condition())
     }
 
+    /// Waits for `semaphore` off the main actor.
+    func waitOff(_ semaphore: DispatchSemaphore) async {
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async {
+                semaphore.wait()
+                done.resume()
+            }
+        }
+    }
+
     /// Returns once everything queued so far has run and reported (a confirmation is queued
     /// behind it and answered on the main actor after the steps' results).
     func flush(_ svc: LidSleepService) async {
@@ -126,12 +136,17 @@ struct LidSleepServiceTests {
         #expect(backend.setCalls == [true])
     }
 
-    @Test func enableWaitsBehindLegacyReset() async throws {
+    @Test func enableWaitsBehindLegacyReset() async {
+        let started = DispatchSemaphore(value: 0)
         let gate = DispatchSemaphore(value: 0)
-        let (svc, _) = service(first: { gate.wait() })
+        let (svc, _) = service(first: {
+            started.signal()
+            gate.wait()
+        })
+        // The reset runs on the queue now; the serial queue keeps the step behind it.
+        await waitOff(started)
         svc.setWanted(true)
         #expect(svc.hold.pending)
-        try await Task.sleep(nanoseconds: 50_000_000)
         #expect(backend.setCalls.isEmpty)
         gate.signal()
         await until { svc.hold.held }
@@ -182,16 +197,47 @@ struct LidSleepServiceTests {
     /// An acquisition refused while the daemon was being checked goes through once it is
     /// verified, even when the refusal comes back after the status changed.
     @Test func refusedEnableRetriesWhenVerifiedMeanwhile() async {
-        backend.stubStatus = .checking
-        let gate = DispatchSemaphore(value: 0)
-        let (svc, _) = service(first: { gate.wait() })
+        // setWanted sees .installed and queues a step; the step sees .checking and refuses;
+        // the refusal's answer finds the helper verified.
+        backend.statusScript = [.installed, .checking]
+        let (svc, holds) = service()
         svc.setWanted(true)
-        gate.signal()
-        // Blocks the main actor: the step is refused on the queue, its answer waits here.
-        usleep(50_000)
-        backend.stubStatus = .installed
         await until { svc.hold.held }
+        #expect(backend.statusScript.isEmpty)
         #expect(backend.setCalls == [true])
+        #expect(!holds.all.contains { $0.failure != nil })
+    }
+
+    /// The status was `.installed` when the step looked, but a re-registration began before
+    /// the acquisition: the backend refuses it unsent, and the service reports it as not ready.
+    @Test func acquisitionRefusedByTheBackendIsNotReady() async {
+        backend.statusScript = [.installed, .installed]
+        backend.stubStatus = .checking
+        let (svc, _) = service()
+        svc.setWanted(true)
+        await until { svc.hold.failure != nil }
+        #expect(svc.hold == LidHold(held: false, pending: false, failure: LidHold.helperNotReady))
+        #expect(backend.setCalls.isEmpty)
+    }
+
+    /// While the helper cannot take the hold, the poll's retries neither show lid mode on its
+    /// way nor queue anything; once it is verified, a retry takes the hold.
+    @Test func retryWaitsQuietlyForAVerifiedHelper() async {
+        for status in [HelperStatus.checking, .needsApproval, .notInstalled, .unsigned, .error("x")] {
+            let backend = FakeBackend()
+            backend.stubStatus = status
+            let svc = LidSleepService(backend: backend)
+            let holds = Holds()
+            svc.onChange = { holds.all.append($0) }
+            svc.setWanted(true)
+            for _ in 0..<3 { svc.retry() }
+            await flush(svc)
+            #expect(holds.all == [LidHold(held: false, pending: false, failure: LidHold.helperNotReady)])
+            backend.stubStatus = .installed
+            svc.retry()
+            await until { svc.hold.held }
+            #expect(backend.setCalls == [true])
+        }
     }
 
     // MARK: - Lost connections
@@ -290,7 +336,7 @@ struct LidSleepServiceTests {
 
     // MARK: - Confirming a release
 
-    @Test func confirmUsesFreshInfoAfterCommands() async throws {
+    @Test func confirmUsesFreshInfoAfterCommands() async {
         let (svc, _) = service()
         backend.stubInfo = info(owned: false)
         backend.freshInfoError = .timedOut
@@ -299,8 +345,8 @@ struct LidSleepServiceTests {
         await until { backend.setCalls == [false] }
         var confirmed: Bool?
         svc.confirmReleased { confirmed = $0 }
-        try await Task.sleep(nanoseconds: 30_000_000)
-        // Queued behind the release.
+        // Queued behind the release, which is still waiting on the serial queue.
+        #expect(backend.freshInfoCalls == 0)
         #expect(confirmed == nil)
         backend.holdSets = false
         backend.releaseSet()

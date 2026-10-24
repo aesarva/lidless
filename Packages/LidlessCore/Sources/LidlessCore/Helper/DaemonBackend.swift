@@ -355,9 +355,15 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
         }
     }
 
+    /// The hold is taken under `mutationLock`: no install, uninstall or re-registration can
+    /// replace the daemon between the verification check and the call.
     @discardableResult
     public func setSleepDisabled(_ disabled: Bool) throws -> UInt64 {
-        try withClient { try $0.setSleepDisabled(disabled) }
+        guard disabled else { return try withClient { try $0.setSleepDisabled(false) } }
+        return try mutationLock.withLock {
+            guard status() == .installed else { throw HelperError.notReady }
+            return try withClient { try $0.setSleepDisabled(true) }
+        }
     }
 
     public func isSleepDisabled() throws -> Bool {

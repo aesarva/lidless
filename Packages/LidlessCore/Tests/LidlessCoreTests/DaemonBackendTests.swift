@@ -304,6 +304,7 @@ private func makeBackend(
     @Test func setSleepDisabledPassesThrough() throws {
         let client = FakeHelperClient()
         let (backend, _) = makeBackend(client: client)
+        backend.refreshInfo()
         client.generation = 7
         #expect(try backend.setSleepDisabled(true) == 7)
         try backend.setSleepDisabled(false)
@@ -316,12 +317,66 @@ private func makeBackend(
     @Test func clientErrorBecomesCommandFailed() {
         let client = FakeHelperClient()
         let (backend, _) = makeBackend(client: client)
+        backend.refreshInfo()
         client.setError = HelperError.commandFailed("pmset failed")
         #expect(throws: HelperError.commandFailed("pmset failed")) { try backend.setSleepDisabled(true) }
         client.setError = FakeError()
         #expect(throws: HelperError.self) { try backend.setSleepDisabled(true) }
         client.infoError = HelperError.commandFailed("no reply")
         #expect(throws: HelperError.commandFailed("no reply")) { try backend.isSleepDisabled() }
+    }
+
+    /// The hold goes only to the daemon verified for this registration; releasing goes to
+    /// whatever answers.
+    @Test func acquisitionNeedsAVerifiedDaemon() throws {
+        let client = FakeHelperClient()
+        let (backend, _) = makeBackend(client: client)
+        #expect(backend.status() == .checking)
+        #expect(throws: HelperError.notReady) { try backend.setSleepDisabled(true) }
+        try backend.setSleepDisabled(false)
+        #expect(client.setCalls == [false])
+        backend.refreshInfo()
+        #expect(try backend.setSleepDisabled(true) == 1)
+        #expect(client.setCalls == [false, true])
+    }
+
+    /// An acquisition that comes in while a re-registration runs waits for it, then finds the
+    /// replacement unverified and is refused unsent.
+    @Test func acquisitionDuringReregistrationIsRefused() {
+        let client = FakeHelperClient()
+        let (backend, registration) = makeBackend(client: client)
+        backend.refreshInfo()
+        #expect(backend.status() == .installed)
+        // Another build answers from now on: re-registered, and the replacement never matches.
+        client.stubInfo = HelperInfo(version: "0.3.0", build: "2", sleepDisabled: false, owned: false)
+        let entered = DispatchSemaphore(value: 0)
+        let gate = DispatchSemaphore(value: 0)
+        registration.onRegister = {
+            entered.signal()
+            gate.wait()
+        }
+        let reregistered = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            backend.refreshInfo()
+            reregistered.signal()
+        }
+        entered.wait()
+        let acquired = DispatchSemaphore(value: 0)
+        let result = LockedBox<Result<UInt64, Error>?>(nil)
+        DispatchQueue.global().async {
+            result.value = Result { try backend.setSleepDisabled(true) }
+            acquired.signal()
+        }
+        gate.signal()
+        reregistered.wait()
+        acquired.wait()
+        if case .failure(let error) = result.value {
+            #expect(error as? HelperError == .notReady)
+        } else {
+            Issue.record("acquired from an unverified replacement")
+        }
+        #expect(client.setCalls.isEmpty)
+        #expect(backend.status() != .installed)
     }
 
     @Test func versionMismatchReregistersOnce() {
@@ -785,4 +840,68 @@ private final class Counter: @unchecked Sendable {
     private var _value = 0
     var value: Int { lock.withLock { _value } }
     func increment() { lock.withLock { _value += 1 } }
+}
+
+final class LockedBox<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: T
+    init(_ value: T) { _value = value }
+    var value: T {
+        get { lock.withLock { _value } }
+        set { lock.withLock { _value = newValue } }
+    }
+}
+
+/// `DaemonBackend` with a re-registration slipped in right after the lid queue's status
+/// check said `.installed`, before its acquisition.
+private final class ReregisteringAfterStatus: PrivilegedBackend, @unchecked Sendable {
+    let inner: DaemonBackend
+    private let armed = LockedBox<(@Sendable () -> Void)?>(nil)
+    init(_ inner: DaemonBackend) { self.inner = inner }
+
+    func arm(_ reregister: @escaping @Sendable () -> Void) { armed.value = reregister }
+
+    func status() -> HelperStatus {
+        let status = inner.status()
+        if status == .installed, !Thread.isMainThread, let reregister = armed.value {
+            armed.value = nil
+            reregister()
+        }
+        return status
+    }
+    func refreshInfo() { inner.refreshInfo() }
+    func lastInfo() -> HelperInfo? { inner.lastInfo() }
+    func freshInfo() throws -> HelperInfo { try inner.freshInfo() }
+    func install() throws { try inner.install() }
+    func uninstall() throws { try inner.uninstall() }
+    func setSleepDisabled(_ disabled: Bool) throws -> UInt64 { try inner.setSleepDisabled(disabled) }
+    func isSleepDisabled() throws -> Bool { try inner.isSleepDisabled() }
+    func legacyHelperPresent() -> Bool { inner.legacyHelperPresent() }
+    func removeLegacyHelper() throws -> [String] { try inner.removeLegacyHelper() }
+    func openSystemSettings() { inner.openSystemSettings() }
+}
+
+@MainActor
+struct DaemonBackendLidTests {
+    /// The lid service saw a verified daemon, then a re-registration replaced it before the
+    /// acquisition: nothing is sent to the unverified replacement, and the service waits for it.
+    @Test func reregistrationBetweenStatusAndAcquisitionSendsNothing() async {
+        let client = FakeHelperClient()
+        let (daemon, _) = makeBackend(client: client)
+        daemon.refreshInfo()
+        let backend = ReregisteringAfterStatus(daemon)
+        backend.arm {
+            client.stubInfo = HelperInfo(version: "0.3.0", build: "2", sleepDisabled: false, owned: false)
+            daemon.refreshInfo()
+        }
+        let svc = LidSleepService(backend: backend)
+        svc.setWanted(true)
+        let deadline = Date().addingTimeInterval(2)
+        while svc.hold.failure == nil, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        #expect(svc.hold == LidHold(held: false, pending: false, failure: LidHold.helperNotReady))
+        #expect(client.setCalls.isEmpty)
+        #expect(daemon.status() != .installed)
+    }
 }

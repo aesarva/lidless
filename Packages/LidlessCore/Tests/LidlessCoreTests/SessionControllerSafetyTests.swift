@@ -212,13 +212,22 @@ struct SessionControllerSafetyTests {
         #expect(helperUnavailablePosts() == 1)
     }
 
+    /// A reset confirmed after an unrelated warning came up leaves that warning alone.
     @Test func successfulRecoveryWhileOffKeepsUnrelatedAttention() {
-        c.start(.indefinite)
+        startWithLid()
+        lid.failDisable = true
+        lid.confirmResult = false
+        c.setLidMode(false)
+        #expect(c.attention == .helperUnavailable)
+        lid.failDisable = false
+        lid.confirmResult = true
         c.update(readings: readings(level: 10, onBattery: true))
+        #expect(c.state == .off)
+        #expect(lid.confirmCalls == 1)
         #expect(c.attention == .lowBattery)
         c.update(readings: readings(level: 10, onBattery: true))
         #expect(c.attention == .lowBattery)
-        #expect(lid.confirmCalls == 0)
+        #expect(lid.confirmCalls == 1)
     }
 
     @Test func failedRecoveryAfterClearRaisesAgain() {
@@ -359,8 +368,26 @@ struct SessionControllerSafetyTests {
         #expect(c.attention == .helperUnavailable)
         lid.confirmResult = true
         c.update(readings: readings())
-        #expect(c.attention == nil)
+        // The reset is confirmed; the thermal suspension still holds and shows again.
+        #expect(c.attention == .thermal)
         #expect(c.session?.lidModeSuspendedReason == .thermal)
+        #expect(lid.acquireCalls == 1)
+    }
+
+    /// The rules would suspend held lid mode when the connection drops (here the thermal rule
+    /// was just turned on): suspended before the service could take the hold again.
+    @Test func connectionLossWhileRulesBlockDoesNotReacquire() {
+        c.settings.safety.thermalRuleEnabled = false
+        startWithLid()
+        c.update(readings: readings(thermal: .serious))
+        #expect(c.session?.lidModeActive == true)
+        c.settings.safety.thermalRuleEnabled = true
+        c.helperConnectionLost(generation: 1)
+        #expect(lid.wanted == [true, false])
+        #expect(lid.acquireCalls == 1)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        #expect(c.attention == .thermal)
+        #expect(notifier.posted == [.lidModeSuspended(.thermal)])
     }
 
     @Test func pollDoesNotRetryOtherSuspensions() {
@@ -614,6 +641,22 @@ struct SessionControllerSafetyTests {
         #expect(lid.acquireCalls == 1)
     }
 
+    /// A safety suspension newer than the restore point stays: the restore must not turn it
+    /// into a helper wait that the poll would re-acquire.
+    @Test func restoreKeepsANewerSafetySuspension() {
+        startWithLid()
+        let point = LidModeRestorePoint(sessionID: c.session?.id, lidModeEnabled: true,
+                                        wasActive: true, suspendedReason: nil)
+        c.update(readings: readings(thermal: .serious))
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        c.restoreAfterFailedRemoval(point)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        c.update(readings: readings())
+        #expect(lid.acquireCalls == 1)
+        #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+    }
+
     /// Lid mode that was on comes back through the safety-checked retry, keeping its start.
     @Test func failedRemovalReenablesActiveLidMode() {
         startWithLid()
@@ -703,12 +746,14 @@ struct SessionControllerSafetyTests {
                                   settingsStore: store, clock: clock)
         c.settings.lidModeEnabled = true
         c.start(.indefinite)
-        await until { c.session?.lidModeActive == true }
+        await until { service.hold == LidHold(held: true, pending: false, failure: nil) }
         backend.generation = 2
         c.setLidMode(false)
-        await until { backend.setCalls == [true, false] }
+        // The service's confirmed release, not just the daemon seeing the call.
+        await until { service.hold == LidHold() }
         c.setLidMode(true)
-        await until { c.session?.lidModeActive == true }
+        await until { service.hold == LidHold(held: true, pending: false, failure: nil) }
+        #expect(c.session?.lidModeActive == true)
         #expect(backend.setCalls == [true, false, true])
 
         c.helperConnectionLost(generation: 1)

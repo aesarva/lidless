@@ -105,9 +105,22 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
     /// Lets one waiting (or the next) `setSleepDisabled` go on.
     func releaseSet() { setGate.signal() }
 
-    func status() -> HelperStatus { stubStatus }
+    private var _statusScript: [HelperStatus] = []
+    /// Answers for the next `status()` calls, in order; then `stubStatus` again. The
+    /// acquisition guard in `setSleepDisabled` always reads `stubStatus`.
+    var statusScript: [HelperStatus] {
+        get { lock.withLock { _statusScript } }
+        set { lock.withLock { _statusScript = newValue } }
+    }
+    private var _freshInfoCalls = 0
+    var freshInfoCalls: Int { lock.withLock { _freshInfoCalls } }
+
+    func status() -> HelperStatus {
+        lock.withLock { _statusScript.isEmpty ? _status : _statusScript.removeFirst() }
+    }
     func lastInfo() -> HelperInfo? { stubInfo }
     func freshInfo() throws -> HelperInfo {
+        lock.withLock { _freshInfoCalls += 1 }
         if let error = freshInfoError { throw error }
         guard let info = stubInfo else { throw HelperError.commandFailed("no info") }
         return info
@@ -133,8 +146,11 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
         }
     }
     func openSystemSettings() {}
+    /// Like `DaemonBackend`: taking the hold is refused, unsent, unless `stubStatus` is
+    /// `.installed`.
     func setSleepDisabled(_ disabled: Bool) throws -> UInt64 {
-        let (generation, waits) = lock.withLock { () -> (UInt64, Bool) in
+        let (generation, waits) = try lock.withLock { () -> (UInt64, Bool) in
+            if disabled, _status != .installed { throw HelperError.notReady }
             _setCalls.append(disabled)
             return (_generation, _holdSets)
         }
@@ -374,10 +390,11 @@ struct FakeError: Error {}
     func cancelEndingSoon() { cancelEndingSoonCount += 1 }
 }
 
-/// The helper service as the controller sees it. With `autoConfirm` each wish is answered at
-/// once, as the service would answer it: an acquisition only for a verified helper
-/// (`.installed`), a release without a call when no daemon is registered. Without it the test
-/// answers with `deliver`.
+/// The helper service as the controller sees it. Like the service, an acquisition that could
+/// only be refused (the helper is not `.installed`) is answered `helperNotReady` at once and
+/// never shows as pending. With `autoConfirm` each wish is answered at once, as the service
+/// would answer it: an acquisition only for a verified helper, a release without a call when
+/// no daemon is registered. Without it the test answers with `deliver`.
 @MainActor final class FakeLid: LidSleepControlling {
     var status: HelperStatus = .installed
     var onChange: ((LidHold) -> Void)?
@@ -391,6 +408,8 @@ struct FakeError: Error {}
     var failDisable = false
     /// With `autoConfirm`: acquisitions sent to a verified helper (failed ones too).
     var acquireCalls = 0
+    /// With `autoConfirm`: releases sent to a registered daemon (failed ones too).
+    var releaseCalls = 0
     var retryCalls = 0
     var lostGenerations: [UInt64] = []
     /// Whether `connectionLost(generation:)` ends a confirmed hold.
@@ -406,6 +425,10 @@ struct FakeError: Error {}
 
     func setWanted(_ wanted: Bool) {
         self.wanted.append(wanted)
+        guard canSend(wanted: wanted, held: hold.held) else {
+            deliver(held: false, failure: LidHold.helperNotReady)
+            return
+        }
         deliver(held: hold.held, pending: wanted != hold.held)
         if autoConfirm { converge() }
     }
@@ -417,7 +440,10 @@ struct FakeError: Error {}
 
     func retry() {
         retryCalls += 1
-        if autoConfirm, hold.failure != nil { converge() }
+        let wish = wanted.last ?? false
+        guard hold.failure != nil || wish != hold.held, canSend(wanted: wish, held: hold.held) else { return }
+        deliver(held: hold.held, pending: wish != hold.held)
+        if autoConfirm { converge() }
     }
 
     func confirmReleased(_ done: @escaping @MainActor (Bool) -> Void) {
@@ -441,8 +467,16 @@ struct FakeError: Error {}
         lostGenerations.append(generation)
         guard lossAffectsHold, hold.held else { return }
         let wish = wanted.last ?? false
+        guard canSend(wanted: wish, held: false) else {
+            deliver(held: false, failure: LidHold.helperNotReady)
+            return
+        }
         deliver(held: false, pending: wish)
         if autoConfirm, wish { converge() }
+    }
+
+    private func canSend(wanted: Bool, held: Bool) -> Bool {
+        !wanted || held || status == .installed
     }
 
     private func answerConfirm(_ done: @MainActor (Bool) -> Void) {
@@ -466,6 +500,7 @@ struct FakeError: Error {}
         } else {
             switch status {
             case .installed, .error, .checking:
+                releaseCalls += 1
                 if failDisable {
                     deliver(held: hold.held, failure: "disable failed")
                     return

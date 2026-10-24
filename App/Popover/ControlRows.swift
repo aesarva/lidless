@@ -81,7 +81,7 @@ struct LidRow: View {
             break
         }
         if controller.session?.lidModePending == true {
-            return (String(localized: "Turning on…"), Studio.inkDim)
+            return (String(localized: "turning on…"), Studio.inkDim)
         }
         if let reason = suspended {
             switch reason {

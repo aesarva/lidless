@@ -211,9 +211,28 @@ struct SessionLidHoldTests {
         lid.deliver(held: true)
         c.setLidMode(false)
         lid.deliver(held: true, failure: "x")
-        let before = lid.retryCalls
+        lid.autoConfirm = true
         c.update(readings: readings())
-        #expect(lid.retryCalls == before + 1)
+        #expect(lid.releaseCalls == 1)
+        #expect(lid.hold == LidHold())
+        #expect(lid.wanted == [true, false])
+    }
+
+    /// Lid mode held again after a failed release: the pending reset is moot, and the warning
+    /// goes when the user has seen it.
+    @Test func reacquiredHoldClearsPendingReset() {
+        startPending()
+        lid.deliver(held: true)
+        c.setLidMode(false)
+        lid.deliver(held: true, failure: "x")
+        c.clearAttention()
+        #expect(c.attention == .helperUnavailable)
+        c.setLidMode(true)
+        lid.deliver(held: true)
+        #expect(c.session?.lidModeActive == true)
+        c.clearAttention()
+        #expect(c.attention == nil)
+        #expect(lid.confirmCalls == 0)
     }
 
     // MARK: - Helper not usable yet
@@ -314,6 +333,44 @@ struct SessionLidHoldTests {
 
     // MARK: - Real service
 
+    /// Waiting for the helper, the poll neither shows lid mode on its way (the switch would
+    /// blink) nor sends anything; a helper in error asks for one background check per poll.
+    @Test func waitingForTheHelperNeverShowsPending() async {
+        for status in [HelperStatus.needsApproval, .notInstalled, .checking, .unsigned, .error("x")] {
+            let backend = FakeBackend()
+            backend.stubStatus = status
+            let service = LidSleepService(backend: backend)
+            let notifier = FakeNotifier()
+            let c = SessionController(assertions: FakeAssertions(), lid: service, notifier: notifier,
+                                      settingsStore: MemorySettingsStore(), clock: clock)
+            var refreshes = 0
+            c.onHelperRefreshNeeded = { refreshes += 1 }
+            c.settings.lidModeEnabled = true
+            c.start(.indefinite)
+            #expect(c.session?.lidModePending == false)
+            await flush(service)
+            for poll in 1...3 {
+                c.update(readings: readings())
+                #expect(c.session?.lidModePending == false)
+                await flush(service)
+                #expect(c.session?.lidModePending == false)
+                #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+                if case .error = status {
+                    await until { refreshes == poll + 1 }
+                } else {
+                    #expect(refreshes == 0)
+                }
+            }
+            #expect(backend.setCalls.isEmpty)
+            if case .error = status {
+                #expect(refreshes == 4)
+                #expect(notifier.posted == [.lidModeSuspended(.helperUnavailable)])
+            } else {
+                #expect(notifier.posted.isEmpty)
+            }
+        }
+    }
+
     /// Turning lid mode off returns at once while the daemon is slow to answer.
     @Test func releaseDoesNotWaitForTheDaemon() async {
         let backend = FakeBackend()
@@ -338,6 +395,14 @@ struct SessionLidHoldTests {
         #expect(backend.setCalls == [true, false])
         #expect(notifier.posted.isEmpty)
         #expect(c.attention == nil)
+    }
+
+    /// Lets the service's queue and its answers, and deferred main-actor work, run.
+    func flush(_ service: LidSleepService) async {
+        var done = false
+        service.confirmReleased { _ in done = true }
+        await until { done }
+        await Task.yield()
     }
 
     func until(_ condition: () -> Bool) async {

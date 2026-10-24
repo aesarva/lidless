@@ -16,8 +16,8 @@ public struct LidHold: Equatable, Sendable {
     }
 
     /// The failure of an acquisition that was not sent: the helper is not verified
-    /// (`.installed`) for this registration yet.
-    public static let helperNotReady = "helper not ready"
+    /// (`.installed`) for this registration yet (also what the backend's refusal says).
+    public static let helperNotReady = HelperError.notReady.message
 }
 
 @MainActor public protocol LidSleepControlling: AnyObject {
@@ -88,13 +88,20 @@ public struct LidHold: Equatable, Sendable {
             s.wish += 1
             return s.heldGeneration != nil
         }
+        guard canSend(wanted: wanted, held: held) else {
+            publish(LidHold(held: false, pending: false, failure: LidHold.helperNotReady))
+            return
+        }
         publish(LidHold(held: held, pending: wanted != held))
         enqueueStep()
     }
 
+    /// Nothing is sent, and nothing shows as on its way, while an acquisition could only be
+    /// refused: `helperDidChange` retries once the helper is verified.
     public func retry() {
-        guard hold.failure != nil, outstanding == 0 else { return }
+        guard outstanding == 0 else { return }
         let (wanted, held) = shared.withLock { ($0.wanted, $0.heldGeneration != nil) }
+        guard hold.failure != nil || wanted != held, canSend(wanted: wanted, held: held) else { return }
         publish(LidHold(held: held, pending: wanted != held))
         enqueueStep()
     }
@@ -130,23 +137,30 @@ public struct LidHold: Equatable, Sendable {
     /// Any connection up to the holding one counts: a newer one dropping means the holding
     /// one was already gone.
     public func connectionLost(generation: UInt64) {
-        let (ended, wanted, held) = shared.withLock { s -> (Bool, Bool, Bool) in
+        let (ended, wanted) = shared.withLock { s -> (Bool, Bool) in
             s.lostGeneration = max(s.lostGeneration ?? 0, generation)
-            guard let holding = s.heldGeneration, generation >= holding else {
-                return (false, s.wanted, s.heldGeneration != nil)
-            }
+            guard let holding = s.heldGeneration, generation >= holding else { return (false, s.wanted) }
             s.heldGeneration = nil
-            return (true, s.wanted, false)
+            return (true, s.wanted)
         }
         if ended {
             // Without a hold the wish "no" is reached: a failed release is moot.
-            publish(LidHold(held: false, pending: wanted, failure: wanted ? hold.failure : nil))
+            let sendable = canSend(wanted: wanted, held: false)
+            publish(LidHold(held: false, pending: wanted && sendable,
+                            failure: sendable ? nil : LidHold.helperNotReady))
         }
-        // A newer hold is untouched by a late report about an older connection.
-        if wanted, !held { enqueueStep() }
+        // Read again: the report may have turned the wish off (a safety suspension). A newer
+        // hold is untouched by a late report about an older connection.
+        let (stillWanted, held) = shared.withLock { ($0.wanted, $0.heldGeneration != nil) }
+        if stillWanted, !held, canSend(wanted: true, held: false) { enqueueStep() }
     }
 
     // MARK: - Private
+
+    /// An acquisition goes only to a verified helper; a release is always worth a step.
+    private func canSend(wanted: Bool, held: Bool) -> Bool {
+        !wanted || held || backend.status() == .installed
+    }
 
     private func publish(_ next: LidHold) {
         hold = next
@@ -178,7 +192,9 @@ public struct LidHold: Equatable, Sendable {
         let status = backend.status()
         if wanted {
             if held { return StepResult(wish: wish, failure: nil) }
-            // Only a daemon verified for this registration is asked to take the hold.
+            // Only a daemon verified for this registration is asked to take the hold. The
+            // backend checks again as it sends (a re-registration may start in between) and
+            // refuses with `HelperError.notReady`, whose message is `helperNotReady`.
             guard status == .installed else { return StepResult(wish: wish, failure: LidHold.helperNotReady) }
             do {
                 let generation = try backend.setSleepDisabled(true)
@@ -212,20 +228,25 @@ public struct LidHold: Equatable, Sendable {
     private func finish(_ result: StepResult) {
         outstanding -= 1
         let (wanted, wish, held) = shared.withLock { ($0.wanted, $0.wish, $0.heldGeneration != nil) }
-        // An answer about an older wish: the step queued for the newer one reports its own.
-        let failure = result.wish == wish ? result.failure : nil
-        var next = LidHold(held: held, pending: wanted != held && failure == nil, failure: failure)
-        if outstanding == 0, wanted != held {
-            if failure == nil {
-                // The reply came over a connection that was lost meanwhile.
-                enqueueStep()
-            } else if failure == LidHold.helperNotReady, wanted, backend.status() == .installed {
-                // Verified while the refusal was on its way.
-                next.failure = nil
-                next.pending = true
-                enqueueStep()
+        // An answer about an older wish says nothing about the current one: what was
+        // published for it stands (a newer step reports its own).
+        var failure = result.wish == wish ? result.failure : hold.failure
+        var pending = false
+        if wanted != held {
+            if outstanding > 0 {
+                pending = failure == nil
+            } else if failure == nil || (wanted && failure == LidHold.helperNotReady) {
+                // The reply came over a connection lost meanwhile, or the helper was verified
+                // while a refusal was on its way: again, if anything can be sent.
+                if canSend(wanted: wanted, held: held) {
+                    failure = nil
+                    pending = true
+                    enqueueStep()
+                } else {
+                    failure = LidHold.helperNotReady
+                }
             }
         }
-        publish(next)
+        publish(LidHold(held: held, pending: pending, failure: failure))
     }
 }
