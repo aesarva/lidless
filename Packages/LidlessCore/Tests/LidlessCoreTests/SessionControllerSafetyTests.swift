@@ -93,6 +93,79 @@ struct SessionControllerSafetyTests {
         #expect(notifier.posted.contains(.lidModeSuspended(.thermal)))
     }
 
+    /// Starting with the lid setting on while the Mac is already hot: the rules judge the
+    /// wish before it is published, so the hold is never taken, not even until the next readings.
+    @Test func startWhileHotPausesLidModeWithoutTakingIt() {
+        c.update(readings: readings(thermal: .serious))
+        startWithLid()
+        #expect(c.session != nil)
+        #expect(lid.wanted.isEmpty)
+        #expect(lid.acquireCalls == 0)
+        #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        #expect(c.attention == .thermal)
+        #expect(notifier.posted == [.lidModeSuspended(.thermal)])
+        // The pause holds, like one of active lid mode: no hold, no second notice.
+        c.update(readings: readings(thermal: .serious))
+        c.update(readings: readings())
+        #expect(lid.acquireCalls == 0)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        #expect(notifier.posted == [.lidModeSuspended(.thermal)])
+    }
+
+    /// The user's own enable while hot: paused for the heat, not wanted. Asking again while
+    /// it is still hot shows the pause again without a second notice.
+    @Test func manualEnableWhileHotPausesLidModeWithoutTakingIt() {
+        c.start(.indefinite)
+        c.update(readings: readings(thermal: .serious))
+        c.setLidMode(true)
+        #expect(c.settings.lidModeEnabled)
+        #expect(lid.wanted.isEmpty)
+        #expect(lid.acquireCalls == 0)
+        #expect(c.session?.lidModeSuspendedReason == .thermal)
+        #expect(c.attention == .thermal)
+        c.clearAttention()
+        c.setLidMode(true)
+        #expect(lid.acquireCalls == 0)
+        #expect(c.attention == .thermal)
+        #expect(notifier.posted == [.lidModeSuspended(.thermal)])
+        // Cooled down: the user's next enable takes it.
+        c.update(readings: readings())
+        c.setLidMode(true)
+        #expect(lid.wanted == [true])
+        #expect(c.session?.lidModeActive == true)
+    }
+
+    /// Enabled while waiting for the helper, the battery time limit is reached before the
+    /// helper is allowed: once it is, the hold is not taken.
+    @Test func batteryLimitReachedWhileWaitingForTheHelperIsNotTaken() {
+        lid.status = .needsApproval
+        startWithLid()
+        #expect(c.session?.lidModeSuspendedReason == .helperUnavailable)
+        clock.advance(240 * 60)
+        c.update(readings: readings(onBattery: true, lidClosed: true, since: t0))
+        lid.status = .installed
+        c.helperDidChange()
+        #expect(lid.acquireCalls == 0)
+        #expect(c.session?.lidModeActive == false)
+        #expect(c.session?.lidModeSuspendedReason == .lidOnBatteryLimit)
+        #expect(c.attention == .lidOnBatteryLimit)
+        #expect(notifier.posted == [.lidModeSuspended(.lidOnBatteryLimit)])
+    }
+
+    /// The user's enable after that pause is judged on a new interval: it is taken.
+    @Test func userEnableAfterTheBatteryLimitStartsANewInterval() {
+        lid.status = .needsApproval
+        startWithLid()
+        clock.advance(240 * 60)
+        c.update(readings: readings(onBattery: true, lidClosed: true, since: t0))
+        c.clearAttention()
+        lid.status = .installed
+        c.setLidMode(true)
+        #expect(lid.acquireCalls == 1)
+        #expect(c.session?.lidModeActive == true)
+    }
+
     @Test func userReenableClearsSuspensionAndResetsLimit() {
         startWithLid()
         let since = t0

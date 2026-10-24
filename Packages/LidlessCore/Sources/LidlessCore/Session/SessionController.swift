@@ -514,10 +514,15 @@ import os
     /// automatic retry after it is judged by the new interval. Before the helper is set up,
     /// allowed or verified, or in a build that cannot have it, lid mode just waits
     /// (`helperDidChange` turns it on). A helper in error is not asked either, but is always
-    /// reported: lid mode the user expects is not on.
+    /// reported: lid mode the user expects is not on. The safety rules judge the wish first,
+    /// on the latest readings: one they would suspend is suspended instead and never wanted.
     private func enableLidMode(keepingStart: Bool = false) {
         mutateSession {
             if !keepingStart || $0.lidModeEnabledAt == nil { $0.lidModeEnabledAt = clock.now }
+        }
+        if let s = session, let reason = safetyBlock(s) {
+            blockLidWish(reason)
+            return
         }
         let status = lid.helperStatus()
         switch status {
@@ -551,9 +556,9 @@ import os
     }
 
     /// Lid mode the user wants but the helper could not apply: try again, unless the safety
-    /// rules would suspend it right away (then it is suspended for that reason instead). A
-    /// helper that is not set up or verified cannot answer, so it is not asked until it is
-    /// (`helperDidChange`); one in error is checked again in the background (`enableLidMode`).
+    /// rules would suspend it right away (then it is suspended for that reason instead, by
+    /// `enableLidMode`). A helper that is not set up or verified cannot answer, so it is not
+    /// asked until it is (`helperDidChange`); one in error is checked again in the background.
     private func retryHelperSuspendedLidMode() {
         guard let s = session, settings.lidModeEnabled, !s.lidModeActive,
               s.lidModeSuspendedReason == .helperUnavailable else { return }
@@ -561,11 +566,18 @@ import os
         case .installed, .error: break
         case .notInstalled, .needsApproval, .checking, .unsigned: return
         }
-        if let reason = safetyBlock(s) {
-            suspendLidMode(reason)
-        } else {
-            enableLidMode(keepingStart: true)
+        enableLidMode(keepingStart: true)
+    }
+
+    /// An enable the safety rules would suspend at once: suspended, as active lid mode would
+    /// be. Already suspended for that reason (the user asked again while it still holds), the
+    /// pause shows again without a second notice.
+    private func blockLidWish(_ reason: SafetyReason) {
+        guard session?.lidModeSuspendedReason != reason else {
+            attention = reason
+            return
         }
+        suspendLidMode(reason)
     }
 
     /// The safety rules apply to lid mode that is wanted but not held yet (on its way, or
