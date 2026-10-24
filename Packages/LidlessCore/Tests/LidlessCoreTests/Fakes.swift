@@ -182,6 +182,14 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
     func isSleepDisabled() throws -> Bool { lock.lock(); defer { lock.unlock() }; return _setCalls.last ?? false }
 }
 
+final class MemoryReregistrationStore: ReregistrationStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _pending: Bool
+    init(pending: Bool = false) { _pending = pending }
+    func isPending() -> Bool { lock.withLock { _pending } }
+    func setPending(_ pending: Bool) { lock.withLock { _pending = pending } }
+}
+
 final class FakeRegistration: HelperRegistration, @unchecked Sendable {
     private let lock = NSLock()
     private var _status: RegistrationStatus

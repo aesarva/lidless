@@ -10,12 +10,15 @@ private struct RegisterError: LocalizedError, CustomStringConvertible {
 private func makeBackend(
     _ status: RegistrationStatus = .enabled, client: HelperClient? = FakeHelperClient(),
     appVersion: String = "0.3.0", appBuild: String = "1",
-    root: URL = URL(fileURLWithPath: "/nonexistent-lidless-root")
+    root: URL = URL(fileURLWithPath: "/nonexistent-lidless-root"),
+    registration: FakeRegistration? = nil,
+    reregistrationStore: ReregistrationStore = MemoryReregistrationStore()
 ) -> (DaemonBackend, FakeRegistration) {
-    let registration = FakeRegistration(status: status)
+    let registration = registration ?? FakeRegistration(status: status)
     let backend = DaemonBackend(registration: registration, client: client, appVersion: appVersion,
                                 appBuild: appBuild,
                                 legacy: LegacyHelperCleaner(root: root, runner: FakeCommandRunner()),
+                                reregistrationStore: reregistrationStore,
                                 verifyDelay: 0, unregisterWait: 0, retryDelay: 0)
     return (backend, registration)
 }
@@ -502,10 +505,12 @@ private func makeBackend(
         #expect(registration.registerCalls == 4)
     }
 
-    private func mismatched() -> (DaemonBackend, FakeRegistration, FakeHelperClient) {
+    private func mismatched(store: ReregistrationStore = MemoryReregistrationStore())
+        -> (DaemonBackend, FakeRegistration, FakeHelperClient) {
         let client = FakeHelperClient()
         client.stubInfo = HelperInfo(version: "0.2.9", build: "1", sleepDisabled: false, owned: false)
-        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0")
+        let (backend, registration) = makeBackend(client: client, appVersion: "0.3.0",
+                                                  reregistrationStore: store)
         return (backend, registration, client)
     }
 
@@ -617,6 +622,69 @@ private func makeBackend(
         #expect(registration.calls == ["startUnregister"])
         backend.refreshInfo()
         #expect(registration.calls == ["startUnregister", "startUnregister", "register"])
+    }
+
+    // MARK: - Across launches
+
+    /// The register() after the unregister failed (or an update relaunched Lidless in
+    /// between): the next launch registers the daemon again on its first refresh.
+    @Test func unfinishedReregistrationResumesInTheNextLaunch() {
+        let store = MemoryReregistrationStore()
+        let (first, registration, client) = mismatched(store: store)
+        registration.registerError = RegisterError()
+        first.refreshInfo()
+        #expect(registration.stubStatus == .notRegistered)
+        #expect(store.isPending())
+
+        registration.registerError = nil
+        client.stubInfo = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
+        let (next, _) = makeBackend(client: client, registration: registration, reregistrationStore: store)
+        #expect(next.status() == .notInstalled)
+        #expect(!next.daemonMayRun)
+        next.refreshInfo()
+        #expect(registration.calls == ["startUnregister", "register", "register", "register", "register"])
+        #expect(next.status() == .installed)
+        #expect(!store.isPending())
+    }
+
+    /// The flag is set before the unregister and cleared once register() went through.
+    @Test func reregistrationIsRecordedUntilRegistered() {
+        let store = MemoryReregistrationStore()
+        let (backend, registration, _) = mismatched(store: store)
+        let pendingAtRegister = LockedBox<Bool?>(nil)
+        registration.onRegister = { pendingAtRegister.value = store.isPending() }
+        backend.refreshInfo()
+        #expect(pendingAtRegister.value == true)
+        #expect(registration.registerCalls == 1)
+        #expect(!store.isPending())
+    }
+
+    /// The user's Remove ends an unfinished re-registration for good, in later launches too.
+    @Test func uninstallClearsAnUnfinishedReregistration() throws {
+        let store = MemoryReregistrationStore()
+        let (first, registration, client) = mismatched(store: store)
+        registration.registerError = RegisterError()
+        first.refreshInfo()
+        #expect(store.isPending())
+        try first.uninstall()
+        #expect(!store.isPending())
+
+        registration.registerError = nil
+        let (next, _) = makeBackend(client: client, registration: registration, reregistrationStore: store)
+        next.refreshInfo()
+        #expect(registration.registerCalls == 3)
+        #expect(next.status() == .notInstalled)
+    }
+
+    /// The daemon is registered at launch after all: the usual checks decide, the flag goes.
+    @Test func unfinishedReregistrationWithTheDaemonRegisteredIsDropped() {
+        let store = MemoryReregistrationStore(pending: true)
+        let client = FakeHelperClient()
+        let (backend, registration) = makeBackend(.enabled, client: client, reregistrationStore: store)
+        #expect(!store.isPending())
+        backend.refreshInfo()
+        #expect(registration.calls.isEmpty)
+        #expect(backend.status() == .installed)
     }
 
     /// install() resumes the pending re-registration: it waits for the outstanding unregister.

@@ -1,6 +1,27 @@
 import Foundation
 import os
 
+/// Whether a re-registration of the daemon began and did not finish, kept across launches:
+/// its register() may fail, or an update may relaunch Lidless between unregister and register.
+public protocol ReregistrationStore: Sendable {
+    func isPending() -> Bool
+    func setPending(_ pending: Bool)
+}
+
+public struct UserDefaultsReregistrationStore: ReregistrationStore {
+    static let key = "helperReregistrationPending"
+    // UserDefaults is thread-safe, but not marked Sendable in this SDK.
+    nonisolated(unsafe) private let defaults: UserDefaults
+
+    public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
+    public func isPending() -> Bool { defaults.bool(forKey: Self.key) }
+
+    public func setPending(_ pending: Bool) {
+        if pending { defaults.set(true, forKey: Self.key) } else { defaults.removeObject(forKey: Self.key) }
+    }
+}
+
 /// `PrivilegedBackend` over the privileged daemon: registration through SMAppService,
 /// commands over XPC. `client == nil` means a build without a Team ID (`.unsigned`): the
 /// daemon would reject it, so registration is never touched and no connection is opened.
@@ -12,6 +33,8 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     private let appVersion: String
     private let appBuild: String
     private let legacy: LegacyHelperCleaner
+    /// Set while `reregistration` is pending, so the next launch can finish it.
+    private let reregistrationStore: ReregistrationStore
     /// Pause before each check of a re-registered daemon (it restarts first).
     private let verifyDelay: TimeInterval
     private static let verifyAttempts = 3
@@ -29,7 +52,8 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     /// `.installed` rather than `.checking`.
     private var verified = false
     /// Where the once-per-launch re-registration of a daemon that failed a check stands. A
-    /// step that failed is retried by the next `refreshInfo()`, not forbidden for the launch.
+    /// step that failed is retried by the next `refreshInfo()`, not forbidden for the launch;
+    /// a pending one is also kept in `reregistrationStore` for the next launch.
     private enum Reregistration { case none, unregisterPending, registerPending, done }
     private var reregistration = Reregistration.none
     /// Why the pending re-registration began (the failed check).
@@ -47,18 +71,33 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
     /// background re-registration can never undo the user's uninstall.
     private let mutationLock = NSLock()
 
+    /// A re-registration an earlier launch left unfinished is resumed by the first
+    /// `refreshInfo()` (or `install()`) while nothing is registered; the user's Remove clears it.
     public init(registration: HelperRegistration, client: HelperClient?, appVersion: String,
                 appBuild: String,
-                legacy: LegacyHelperCleaner = LegacyHelperCleaner(), verifyDelay: TimeInterval = 1,
+                legacy: LegacyHelperCleaner = LegacyHelperCleaner(),
+                reregistrationStore: ReregistrationStore = UserDefaultsReregistrationStore(),
+                verifyDelay: TimeInterval = 1,
                 unregisterWait: TimeInterval = 10, retryDelay: TimeInterval = 1) {
         self.registration = registration
         self.client = client
         self.appVersion = appVersion
         self.appBuild = appBuild
         self.legacy = legacy
+        self.reregistrationStore = reregistrationStore
         self.verifyDelay = verifyDelay
         self.unregisterWait = unregisterWait
         self.retryDelay = retryDelay
+        guard client != nil, reregistrationStore.isPending() else { return }
+        switch registration.status {
+        case .notRegistered, .notFound:
+            // Unregistered, not registered again: only register() is left.
+            reregistration = .registerPending
+            reregistrationReason = "the helper was left unregistered by an unfinished re-registration"
+        case .enabled, .requiresApproval:
+            // Registered after all: the checks decide, as for any launch.
+            reregistrationStore.setPending(false)
+        }
     }
 
     /// Fires with a connection's generation after it dropped (timeout, idle exit, crash): what
@@ -223,6 +262,8 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
                     guard enabled else { return .refused }
                     reregistration = .unregisterPending
                     reregistrationReason = failure
+                    // Before the unregister: a launch that finds the daemon gone finishes it.
+                    reregistrationStore.setPending(true)
                 case .unregisterPending, .registerPending: break
                 case .done: return .alreadyDone
                 }
@@ -276,6 +317,7 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
             guard registration.status == .requiresApproval else { throw error }
         }
         lock.withLock { reregistration = .done }
+        reregistrationStore.setPending(false)
     }
 
     /// Returns once launchd no longer has the old daemon. An `unregister` that is still
@@ -351,6 +393,8 @@ public final class DaemonBackend: PrivilegedBackend, @unchecked Sendable {
             outstandingUnregister = nil
             registrationGeneration += 1
         }
+        // Not resumed in a later launch either.
+        reregistrationStore.setPending(false)
         // Nothing registered (e.g. a re-registration that did not finish): nothing to undo.
         guard registration.status != .notRegistered, registration.status != .notFound else { return }
         do {
