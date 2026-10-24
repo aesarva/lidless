@@ -252,7 +252,11 @@ public struct LidHold: Equatable, Sendable {
         // published for it stands (a newer step reports its own).
         var failure = result.wish == wish ? result.failure : hold.failure
         var pending = false
-        if wanted != held {
+        if wanted, held {
+            // Held as wished (a step for an older wish took it): a refusal published since is
+            // moot. A failed release is kept even with nothing held here: the daemon may hold.
+            failure = nil
+        } else if wanted != held {
             if outstanding > 0 {
                 pending = failure == nil
             } else if failure == nil || (wanted && failure == LidHold.helperNotReady) {

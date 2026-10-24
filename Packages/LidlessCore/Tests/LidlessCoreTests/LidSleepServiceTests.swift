@@ -153,6 +153,33 @@ struct LidSleepServiceTests {
         #expect(backend.setCalls == [true])
     }
 
+    /// An acquisition from an earlier wish lands after a newer wish was refused unsent: the
+    /// wish is reached, so the refusal is no failure any more.
+    @Test func reachedWishClearsAStaleFailure() async {
+        let (svc, _) = service()
+        backend.holdSets = true
+        svc.setWanted(true)
+        await until { backend.setCalls == [true] }
+        backend.stubStatus = .checking
+        svc.setWanted(true)
+        #expect(svc.hold.failure == LidHold.helperNotReady)
+        backend.holdSets = false
+        backend.releaseSet()
+        await until { svc.hold.held }
+        await flush(svc)
+        #expect(svc.hold == LidHold(held: true, pending: false, failure: nil))
+    }
+
+    /// Nothing held here is no proof the daemon holds nothing: a failed release still counts.
+    @Test func failedReleaseWithNothingHeldKeepsItsFailure() async {
+        let (svc, _) = service()
+        backend.failNextSet = .commandFailed("y")
+        svc.setWanted(false)
+        await until { svc.hold.failure != nil }
+        await flush(svc)
+        #expect(svc.hold == LidHold(held: false, pending: false, failure: "y"))
+    }
+
     // MARK: - Helper status
 
     /// Only a daemon verified for this registration is asked to take the hold.
