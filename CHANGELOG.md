@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 — 2026-10-26
+
+- New app icon: a glossy red studio beacon, lit from inside, with the pulse line.
+
 ## 0.4.0 — 2026-10-24
 
 - Lidless now updates itself: it reads a small feed on GitHub once a day, and when a new version is out the panel shows "Version X available" with a blue dot on the menu-bar icon. One press on Install and Relaunch downloads it, checks its signature and relaunches Lidless. Switch the daily check off in Settings → General → Check for updates automatically.

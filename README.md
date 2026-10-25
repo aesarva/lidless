@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/icon.png" width="128" height="128" alt="Lidless app icon: a lit red ON AIR lamp with a pulse line">
+  <img src="docs/images/icon.png" width="128" height="128" alt="Lidless app icon: a lit red studio beacon with a pulse line">
 </p>
 
 <h1 align="center">Lidless</h1>
