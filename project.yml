@@ -7,11 +7,14 @@ options:
 # every launch. Both targets inherit these.
 settings:
   base:
-    MARKETING_VERSION: "0.3.0"
+    MARKETING_VERSION: "0.4.0"
     CURRENT_PROJECT_VERSION: "1"
 packages:
   LidlessCore:
     path: Packages/LidlessCore
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
 targets:
   Lidless:
     type: application
@@ -25,6 +28,8 @@ targets:
           copyFiles: {destination: wrapper, subpath: Contents/Library/LaunchDaemons}
     dependencies:
       - package: LidlessCore
+      # Auto-updates; Xcode embeds Sparkle.framework in Contents/Frameworks.
+      - package: Sparkle
       - target: LidlessHelper
         embed: true
         copy: {destination: executables}
@@ -39,7 +44,12 @@ targets:
         SWIFT_EMIT_LOC_STRINGS: YES
         LOCALIZATION_PREFERS_STRING_CATALOGS: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        ENABLE_HARDENED_RUNTIME: YES
+      # Hardened runtime only in Release: its library validation refuses Sparkle.framework in an
+      # ad-hoc (Debug) build, which has no Team ID. scripts/build-app.sh re-signs the Release
+      # build and keeps it only for a Developer ID.
+      configs:
+        Release:
+          ENABLE_HARDENED_RUNTIME: YES
   LidlessHelper:
     type: tool
     platform: macOS
@@ -56,7 +66,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.aesarva.Lidless.helper
         GENERATE_INFOPLIST_FILE: YES
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
-        ENABLE_HARDENED_RUNTIME: YES
         SKIP_INSTALL: YES
         SWIFT_VERSION: "6.0"
         CODE_SIGN_IDENTITY: "-"
+      configs:
+        Release:
+          ENABLE_HARDENED_RUNTIME: YES

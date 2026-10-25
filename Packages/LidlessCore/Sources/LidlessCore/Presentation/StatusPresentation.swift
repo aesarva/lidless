@@ -8,21 +8,27 @@ public struct StatusPresentation: Equatable, Sendable {
     public let progress: Double?
     /// Только showTimerText && active && endsAt != nil.
     public let timerText: String?
+    /// Точка «доступно обновление» (акцентный цвет). Оранжевая точка внимания важнее: при ней синей нет.
+    public let updateDot: Bool
 
-    public init(glyph: IconGlyph, progress: Double?, timerText: String?) {
+    public init(glyph: IconGlyph, progress: Double?, timerText: String?, updateDot: Bool = false) {
         self.glyph = glyph
         self.progress = progress
         self.timerText = timerText
+        self.updateDot = updateDot
     }
 
     public static func make(
         state: SessionState,
         attention: SafetyReason?,
+        updateAvailable: Bool = false,
         showTimerText: Bool,
         now: Date
     ) -> StatusPresentation {
+        let updateDot = updateAvailable && attention == nil
         guard case .active(let session) = state else {
-            return StatusPresentation(glyph: attention != nil ? .attention : .off, progress: nil, timerText: nil)
+            return StatusPresentation(glyph: attention != nil ? .attention : .off, progress: nil, timerText: nil,
+                                      updateDot: updateDot)
         }
 
         var progress: Double?
@@ -50,7 +56,7 @@ public struct StatusPresentation: Equatable, Sendable {
         } else {
             glyph = .active
         }
-        return StatusPresentation(glyph: glyph, progress: progress, timerText: text)
+        return StatusPresentation(glyph: glyph, progress: progress, timerText: text, updateDot: updateDot)
     }
 
     /// Округление вверх до минут, "H:MM"; только цифры и ':' (не зависит от локали).

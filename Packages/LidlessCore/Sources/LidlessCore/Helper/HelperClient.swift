@@ -2,16 +2,23 @@ import Foundation
 
 public struct HelperInfo: Equatable, Sendable {
     public let version: String
+    public let build: String
     public let sleepDisabled: Bool
+    /// The daemon set the 1 itself (its marker is `.owned`), so it may reset it.
+    public let owned: Bool
 
-    public init(version: String, sleepDisabled: Bool) {
+    public init(version: String, build: String, sleepDisabled: Bool, owned: Bool) {
         self.version = version
+        self.build = build
+        self.owned = owned
         self.sleepDisabled = sleepDisabled
     }
 }
 
 /// Synchronous calls to the privileged daemon. Errors are `HelperError.rejected` when the
-/// daemon dropped the connection unanswered, otherwise `HelperError.commandFailed`.
+/// daemon dropped the connection unanswered or failed the code-signing requirement,
+/// `HelperError.timedOut` when no reply came in
+/// time, otherwise `HelperError.commandFailed` (the daemon answered with an error).
 /// Connections are numbered (generations, increasing from 1): the daemon ties a hold to the
 /// connection that took it and releases it when that connection closes.
 public protocol HelperClient: AnyObject, Sendable {
@@ -72,8 +79,8 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
 
     public func info() throws -> HelperInfo {
         let (info, error): (HelperInfo, String?) = try call { helper, reply in
-            helper.info { version, sleepDisabled, error in
-                reply((HelperInfo(version: version, sleepDisabled: sleepDisabled), error))
+            helper.info { version, build, sleepDisabled, owned, error in
+                reply((HelperInfo(version: version, build: build, sleepDisabled: sleepDisabled, owned: owned), error))
             }
         }
         if let error { throw HelperError.commandFailed(error) }
@@ -151,9 +158,17 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
             let proxy = c.synchronousRemoteObjectProxyWithErrorHandler { error in
                 // Interrupted or invalid with the call unanswered: a daemon from another build
                 // that cannot decode it cancels the connection, which arrives as either.
+                // A signature failure: the daemon runs from a bundle replaced since it started
+                // (an update), so it no longer passes the requirement. Re-registration fixes both.
                 let nsError = error as NSError
                 let rejected = nsError.domain == NSCocoaErrorDomain
-                    && [NSXPCConnectionInterrupted, NSXPCConnectionInvalid].contains(nsError.code)
+                    && [NSXPCConnectionInterrupted, NSXPCConnectionInvalid,
+                        NSXPCConnectionCodeSigningRequirementFailure].contains(nsError.code)
+                // XPC keeps that connection open, every later message failing the same way:
+                // drop it, so the next call reaches the daemon launchd runs then.
+                if nsError.domain == NSCocoaErrorDomain, nsError.code == NSXPCConnectionCodeSigningRequirementFailure {
+                    self.drop(current)
+                }
                 let message = error.localizedDescription
                 finish(.failure(rejected ? .rejected(message) : .commandFailed(message)))
             }
@@ -164,7 +179,7 @@ public final class XPCHelperClient: HelperClient, @unchecked Sendable {
             send(helper) { finish(.success($0)) }
         }
         if done.wait(timeout: .now() + timeout) == .timedOut,
-           outcome.fill(.failure(.commandFailed("timed out"))) {
+           outcome.fill(.failure(.timedOut)) {
             drop(current)
         }
         guard let result = outcome.result else { throw HelperError.commandFailed("no reply") }

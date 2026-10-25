@@ -80,7 +80,68 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
         set { lock.withLock { _statusAfterRefresh = newValue } }
     }
 
-    func status() -> HelperStatus { stubStatus }
+    private var _lastInfo: HelperInfo?
+    /// What `lastInfo()` and `freshInfo()` answer.
+    var stubInfo: HelperInfo? {
+        get { lock.withLock { _lastInfo } }
+        set { lock.withLock { _lastInfo = newValue } }
+    }
+
+    private var _freshInfoError: HelperError?
+    /// Thrown by `freshInfo()` while set; `lastInfo()` still answers `stubInfo`.
+    var freshInfoError: HelperError? {
+        get { lock.withLock { _freshInfoError } }
+        set { lock.withLock { _freshInfoError = newValue } }
+    }
+
+    private var _holdSets = false
+    private let setGate = DispatchSemaphore(value: 0)
+    /// While set, each `setSleepDisabled` waits for a `releaseSet()` (a slow daemon). The call
+    /// is recorded, and its connection's generation taken, before it waits.
+    var holdSets: Bool {
+        get { lock.withLock { _holdSets } }
+        set { lock.withLock { _holdSets = newValue } }
+    }
+    /// Lets one waiting (or the next) `setSleepDisabled` go on.
+    func releaseSet() { setGate.signal() }
+
+    private var _statusScript: [HelperStatus] = []
+    /// Answers for the next `status()` calls, in order; then `stubStatus` again. The
+    /// acquisition guard in `setSleepDisabled` always reads `stubStatus`.
+    var statusScript: [HelperStatus] {
+        get { lock.withLock { _statusScript } }
+        set { lock.withLock { _statusScript = newValue } }
+    }
+    private var _freshInfoCalls = 0
+    var freshInfoCalls: Int { lock.withLock { _freshInfoCalls } }
+
+    private var _daemonMayRunOverride: Bool?
+    /// What `daemonMayRun` answers; nil: a daemon may run while `stubStatus` is `.installed`,
+    /// `.checking` or `.error` (registered and enabled).
+    var daemonMayRunOverride: Bool? {
+        get { lock.withLock { _daemonMayRunOverride } }
+        set { lock.withLock { _daemonMayRunOverride = newValue } }
+    }
+
+    func status() -> HelperStatus {
+        lock.withLock { _statusScript.isEmpty ? _status : _statusScript.removeFirst() }
+    }
+    var daemonMayRun: Bool {
+        lock.withLock {
+            if let _daemonMayRunOverride { return _daemonMayRunOverride }
+            switch _status {
+            case .installed, .checking, .error: return true
+            case .notInstalled, .needsApproval, .unsigned: return false
+            }
+        }
+    }
+    func lastInfo() -> HelperInfo? { stubInfo }
+    func freshInfo() throws -> HelperInfo {
+        lock.withLock { _freshInfoCalls += 1 }
+        if let error = freshInfoError { throw error }
+        guard let info = stubInfo else { throw HelperError.commandFailed("no info") }
+        return info
+    }
     func refreshInfo() {
         lock.withLock {
             _refreshInfoCalls += 1
@@ -102,17 +163,31 @@ final class FakeBackend: PrivilegedBackend, @unchecked Sendable {
         }
     }
     func openSystemSettings() {}
+    /// Like `DaemonBackend`: taking the hold is refused, unsent, unless `stubStatus` is
+    /// `.installed`.
     func setSleepDisabled(_ disabled: Bool) throws -> UInt64 {
-        lock.lock()
-        _setCalls.append(disabled)
-        let failure = _failNextSet
-        _failNextSet = nil
-        let generation = _generation
-        lock.unlock()
+        let (generation, waits) = try lock.withLock { () -> (UInt64, Bool) in
+            if disabled, _status != .installed { throw HelperError.notReady }
+            _setCalls.append(disabled)
+            return (_generation, _holdSets)
+        }
+        if waits { setGate.wait() }
+        let failure = lock.withLock { () -> HelperError? in
+            defer { _failNextSet = nil }
+            return _failNextSet
+        }
         if let failure { throw failure }
         return generation
     }
     func isSleepDisabled() throws -> Bool { lock.lock(); defer { lock.unlock() }; return _setCalls.last ?? false }
+}
+
+final class MemoryReregistrationStore: ReregistrationStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _pending: Bool
+    init(pending: Bool = false) { _pending = pending }
+    func isPending() -> Bool { lock.withLock { _pending } }
+    func setPending(_ pending: Bool) { lock.withLock { _pending = pending } }
 }
 
 final class FakeRegistration: HelperRegistration, @unchecked Sendable {
@@ -124,6 +199,9 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
     private var _registerError: Error?
     private var _statusAfterRegister: RegistrationStatus?
     private var _onRegister: (@Sendable () -> Void)?
+    private var _outstanding: PendingUnregister?
+    private var _calls: [String] = []
+    private var _unregisterHangs = false
 
     init(status: RegistrationStatus = .notRegistered) { _status = status }
 
@@ -147,7 +225,15 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
         get { lock.withLock { _statusAfterRegister } }
         set { lock.withLock { _statusAfterRegister = newValue } }
     }
+    /// `startUnregister` holds its completion until `completeUnregister()`.
+    var unregisterHangs: Bool {
+        get { lock.withLock { _unregisterHangs } }
+        set { lock.withLock { _unregisterHangs = newValue } }
+    }
+    /// "register", "unregister" and "startUnregister", in call order.
+    var calls: [String] { lock.withLock { _calls } }
     var registerCalls: Int { lock.withLock { _registerCalls } }
+    /// Both `unregister()` and `startUnregister()`.
     var unregisterCalls: Int { lock.withLock { _unregisterCalls } }
     var openSettingsCalls: Int { lock.withLock { _openSettingsCalls } }
 
@@ -157,6 +243,7 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
         onRegister?()
         lock.lock(); defer { lock.unlock() }
         _registerCalls += 1
+        _calls.append("register")
         if let _registerError { throw _registerError }
         _status = _statusAfterRegister ?? .enabled
     }
@@ -164,8 +251,36 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
     func unregister() throws {
         lock.withLock {
             _unregisterCalls += 1
+            _calls.append("unregister")
             _status = .notRegistered
         }
+    }
+
+    func startUnregister() -> PendingUnregister {
+        let pending = PendingUnregister()
+        let hangs = lock.withLock { () -> Bool in
+            _calls.append("startUnregister")
+            _unregisterCalls += 1
+            if _unregisterHangs { _outstanding = pending }
+            return _unregisterHangs
+        }
+        if !hangs { finish(pending) }
+        return pending
+    }
+
+    /// Launchd's completion of the hung `startUnregister`. The status flips with it unless
+    /// `statusFollows` is false (it can change before or after the handler runs).
+    func completeUnregister(error: Error? = nil, statusFollows: Bool = true) {
+        guard let pending = lock.withLock({ () -> PendingUnregister? in
+            defer { _outstanding = nil }
+            return _outstanding
+        }) else { return }
+        finish(pending, error: error, flipStatus: statusFollows)
+    }
+
+    private func finish(_ pending: PendingUnregister, error: Error? = nil, flipStatus: Bool = true) {
+        if error == nil && flipStatus { lock.withLock { _status = .notRegistered } }
+        pending.complete(error)
     }
 
     func openSystemSettings() { lock.withLock { _openSettingsCalls += 1 } }
@@ -173,7 +288,7 @@ final class FakeRegistration: HelperRegistration, @unchecked Sendable {
 
 final class FakeHelperClient: HelperClient, @unchecked Sendable {
     private let lock = NSLock()
-    private var _info = HelperInfo(version: "0.3.0", sleepDisabled: false)
+    private var _info = HelperInfo(version: "0.3.0", build: "1", sleepDisabled: false, owned: false)
     private var _infoError: Error?
     private var _setError: Error?
     private var _setCalls: [Bool] = []
@@ -300,33 +415,137 @@ struct FakeError: Error {}
     func cancelEndingSoon() { cancelEndingSoonCount += 1 }
 }
 
+/// The helper service as the controller sees it. Like the service, an acquisition that could
+/// only be refused (the helper is not `.installed`) is answered `helperNotReady` at once and
+/// never shows as pending. With `autoConfirm` each wish is answered at once, as the service
+/// would answer it: an acquisition only for a verified helper, a release without a call when
+/// no daemon is registered. Without it the test answers with `deliver`.
 @MainActor final class FakeLid: LidSleepControlling {
-    var enableCalls = 0
-    var disableCalls = 0
-    var recoverCalls = 0
-    var lostGenerations: [UInt64] = []
-    /// What `connectionLost(generation:)` answers: whether the loss ended the current hold.
-    var lossAffectsHold = true
-    var failEnable = false
-    var failDisable = false
-    var failRecover = false
     var status: HelperStatus = .installed
+    var onChange: ((LidHold) -> Void)?
+    private(set) var hold = LidHold()
+    /// Every `setWanted`, in order.
+    var wanted: [Bool] = []
+    var autoConfirm = true
+    /// With `autoConfirm`: acquisitions fail.
+    var failEnable = false
+    /// With `autoConfirm`: releases sent to the daemon fail and the hold stays as it was.
+    var failDisable = false
+    /// With `autoConfirm`: acquisitions sent to a verified helper (failed ones too).
+    var acquireCalls = 0
+    /// With `autoConfirm`: releases sent to a registered daemon (failed ones too).
+    var releaseCalls = 0
+    var retryCalls = 0
+    var lostGenerations: [UInt64] = []
+    /// Whether `connectionLost(generation:)` ends a confirmed hold.
+    var lossAffectsHold = true
+    /// What `confirmReleased` answers.
+    var confirmResult = true
+    var confirmCalls = 0
+    /// `confirmReleasedForRemoval` calls, answered like `confirmReleased`.
+    var removalConfirmCalls = 0
+    /// `confirmReleased` and `confirmReleasedForRemoval` wait for `deliverConfirm()`.
+    var holdConfirm = false
+    private var heldConfirm: (wishes: Int, done: @MainActor (Bool) -> Void)?
+
     func helperStatus() -> HelperStatus { status }
-    func enable() throws {
-        enableCalls += 1
-        if failEnable { throw FakeError() }
+
+    func setWanted(_ wanted: Bool) {
+        self.wanted.append(wanted)
+        guard canSend(wanted: wanted, held: hold.held) else {
+            deliver(held: false, failure: LidHold.helperNotReady)
+            return
+        }
+        deliver(held: hold.held, pending: wanted != hold.held)
+        if autoConfirm { converge() }
     }
-    func disable() throws {
-        disableCalls += 1
-        if failDisable { throw FakeError() }
+
+    func deliver(held: Bool, pending: Bool = false, failure: String? = nil) {
+        hold = LidHold(held: held, pending: pending, failure: failure)
+        onChange?(hold)
     }
-    func recoverIfNeeded() -> Bool {
-        recoverCalls += 1
-        return !failRecover
+
+    func retry() {
+        retryCalls += 1
+        let wish = wanted.last ?? false
+        guard hold.failure != nil || wish != hold.held, canSend(wanted: wish, held: hold.held) else { return }
+        deliver(held: hold.held, pending: wish != hold.held)
+        if autoConfirm { converge() }
     }
-    func connectionLost(generation: UInt64) -> Bool {
+
+    func confirmReleased(_ done: @escaping @MainActor (Bool) -> Void) {
+        confirmCalls += 1
+        if holdConfirm {
+            heldConfirm = (wanted.count, done)
+        } else {
+            answerConfirm(done)
+        }
+    }
+
+    func confirmReleasedForRemoval(_ done: @escaping @MainActor (Bool) -> Void) {
+        removalConfirmCalls += 1
+        if holdConfirm {
+            heldConfirm = (wanted.count, done)
+        } else {
+            answerConfirm(done)
+        }
+    }
+
+    /// Answers the held confirmation, unless a newer wish came since (like the service).
+    func deliverConfirm() {
+        guard let pending = heldConfirm else { return }
+        heldConfirm = nil
+        guard pending.wishes == wanted.count else { return }
+        answerConfirm(pending.done)
+    }
+
+    func connectionLost(generation: UInt64) {
         lostGenerations.append(generation)
-        return lossAffectsHold
+        guard lossAffectsHold, hold.held else { return }
+        let wish = wanted.last ?? false
+        guard canSend(wanted: wish, held: false) else {
+            deliver(held: false, failure: LidHold.helperNotReady)
+            return
+        }
+        deliver(held: false, pending: wish)
+        if autoConfirm, wish { converge() }
+    }
+
+    private func canSend(wanted: Bool, held: Bool) -> Bool {
+        !wanted || held || status == .installed
+    }
+
+    private func answerConfirm(_ done: @MainActor (Bool) -> Void) {
+        // A daemon that holds nothing has reached the wish "no", whatever the last release said.
+        if confirmResult, !(wanted.last ?? false), hold.failure != nil { deliver(held: false) }
+        done(confirmResult)
+    }
+
+    private func converge() {
+        if wanted.last ?? false {
+            guard status == .installed else {
+                deliver(held: hold.held, failure: LidHold.helperNotReady)
+                return
+            }
+            acquireCalls += 1
+            if failEnable {
+                deliver(held: false, failure: "enable failed")
+            } else {
+                deliver(held: true)
+            }
+        } else {
+            switch status {
+            case .installed, .error, .checking:
+                releaseCalls += 1
+                if failDisable {
+                    deliver(held: hold.held, failure: "disable failed")
+                    return
+                }
+            case .notInstalled, .needsApproval, .unsigned:
+                break
+            }
+            deliver(held: false)
+        }
     }
 }
 

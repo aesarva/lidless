@@ -1,12 +1,13 @@
 import SwiftUI
 import LidlessCore
 
-enum SettingsTab { case general, safety, helper, about }
+enum SettingsTab: CaseIterable { case general, safety, helper, about }
 
 /// The studio panel under the menu-bar icon.
 struct PopoverView: View {
     let controller: SessionController
     let helper: HelperModel
+    let updates: any UpdateSource
     let openSettings: (SettingsTab) -> Void
 
     var body: some View {
@@ -22,6 +23,7 @@ struct PopoverView: View {
                 DisplayRow(controller: controller)
                 Rectangle().fill(Studio.hairline).frame(height: 1)
                 LidRow(controller: controller, helper: helper)
+                UpdateRow(updates: updates)
             }
             footer
         }

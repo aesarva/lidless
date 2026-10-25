@@ -20,18 +20,35 @@ import LidlessCore
     func save(_ s: LidlessSettings) { settings = s }
 }
 
+/// Confirms every wish at once.
 @MainActor final class PreviewLid: LidSleepControlling {
+    var onChange: ((LidHold) -> Void)?
+    private(set) var hold = LidHold()
     func helperStatus() -> HelperStatus { .installed }
-    func enable() throws {}
-    func disable() throws {}
-    func recoverIfNeeded() -> Bool { true }
-    func connectionLost(generation: UInt64) -> Bool { false }
+    func setWanted(_ wanted: Bool) {
+        hold = LidHold(held: wanted)
+        onChange?(hold)
+    }
+    func retry() {}
+    func confirmReleased(_ done: @escaping @MainActor (Bool) -> Void) { done(true) }
+    func confirmReleasedForRemoval(_ done: @escaping @MainActor (Bool) -> Void) { done(true) }
+    func connectionLost(generation: UInt64) {}
 }
 
 final class PreviewBackend: PrivilegedBackend {
     let current: HelperStatus
     init(_ s: HelperStatus) { current = s }
     func status() -> HelperStatus { current }
+    var daemonMayRun: Bool { [.installed, .checking].contains(current) }
+    func lastInfo() -> HelperInfo? {
+        guard current == .installed else { return nil }
+        return HelperInfo(version: Bundle.main.shortVersion, build: Bundle.main.buildVersion,
+                          sleepDisabled: false, owned: false)
+    }
+    func freshInfo() throws -> HelperInfo {
+        guard let info = lastInfo() else { throw HelperError.commandFailed("preview") }
+        return info
+    }
     func refreshInfo() {}
     func install() throws {}
     func uninstall() throws {}
@@ -40,6 +57,27 @@ final class PreviewBackend: PrivilegedBackend {
     func legacyHelperPresent() -> Bool { false }
     func removeLegacyHelper() throws -> [String] { [] }
     func openSystemSettings() {}
+}
+
+/// A fixed update state: what the panel, the icon and Settings show, without Sparkle.
+@MainActor @Observable final class PreviewUpdates: UpdateSource {
+    var state: UpdateState
+    var canCheckNow = true
+    var automaticallyChecks = true
+    let currentVersion = Bundle.main.shortVersion
+    let currentBuild = Bundle.main.buildVersion
+
+    init(_ state: UpdateState = .idle) { self.state = state }
+
+    var showsBadge: Bool {
+        switch state {
+        case .available, .downloading, .installing, .waitingForLid: true
+        default: false
+        }
+    }
+
+    func install() {}
+    func checkNow() {}
 }
 
 @MainActor func previewController(
@@ -61,9 +99,10 @@ func previewReadings(battery: Int? = 82, onBattery: Bool = false, thermal: Therm
 }
 
 @MainActor func previewView(
-    _ c: SessionController, helper: HelperStatus = .installed
+    _ c: SessionController, helper: HelperStatus = .installed, updates: UpdateState = .idle
 ) -> some View {
-    PopoverView(controller: c, helper: HelperModel(backend: PreviewBackend(helper)), openSettings: { _ in })
+    PopoverView(controller: c, helper: HelperModel(backend: PreviewBackend(helper)),
+                updates: PreviewUpdates(updates), openSettings: { _ in })
 }
 
 #Preview("Off") {
@@ -105,5 +144,15 @@ func previewReadings(battery: Int? = 82, onBattery: Bool = false, thermal: Therm
 
 #Preview("Unsigned build") {
     previewView(previewController(readings: previewReadings()), helper: .unsigned)
+}
+
+#Preview("Update available") {
+    previewView(previewController(readings: previewReadings()),
+                updates: .available(version: "0.4.1", notesURL: URL(string: "https://github.com/aesarva/lidless")))
+}
+
+#Preview("Update downloading") {
+    previewView(previewController(readings: previewReadings()),
+                updates: .downloading(version: "0.4.1", progress: 0.42))
 }
 #endif

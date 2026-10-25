@@ -2,9 +2,7 @@ import AppKit
 import SwiftUI
 
 struct AboutTab: View {
-    private var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
-    }
+    let updates: any UpdateSource
 
     var body: some View {
         VStack(spacing: 10) {
@@ -12,7 +10,9 @@ struct AboutTab: View {
                 .resizable()
                 .frame(width: 96, height: 96)
             Text("Lidless").font(.system(size: 22, weight: .semibold))
-            Text("Version \(version)").foregroundStyle(.secondary).monospacedDigit()
+            Text("Version \(updates.currentVersion) (build \(updates.currentBuild))")
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
             Link("github.com/aesarva/lidless", destination: URL(string: "https://github.com/aesarva/lidless")!)
         }
         .padding(.vertical, 24)

@@ -55,10 +55,11 @@ struct LidRow: View {
 
     private var suspended: SafetyReason? { controller.session?.lidModeSuspendedReason }
 
-    /// What the switch shows: the live state during a session, the setting otherwise.
+    /// What the switch shows: during a session, lid mode the session wants (on its way or
+    /// waiting for the helper counts as on, the detail says why it is not held yet; a safety
+    /// pause is off), the setting otherwise.
     private var isOn: Bool {
-        if let s = controller.session { return s.lidModeActive }
-        return controller.settings.lidModeEnabled
+        controller.session != nil ? controller.lidModeWanted : controller.settings.lidModeEnabled
     }
 
     private var detail: (String, Color) {
@@ -70,12 +71,17 @@ struct LidRow: View {
             return (String(localized: "needs a one-time approval in System Settings"), Studio.caution)
         case .needsApproval:
             return (String(localized: "allow Lidless in System Settings → Login Items"), Studio.caution)
+        case .checking:
+            return (String(localized: "checking…"), Studio.inkDim)
         case .unsigned:
             return (String(localized: "needs a signed build"), Studio.caution)
         case .error(let message):
             return (String(localized: "helper error: \(message)"), Studio.caution)
         case .installed:
             break
+        }
+        if controller.session?.lidModePending == true {
+            return (String(localized: "turning on…"), Studio.inkDim)
         }
         if let reason = suspended {
             switch reason {
@@ -99,7 +105,7 @@ struct LidRow: View {
             title: String(localized: "Closed-lid mode"),
             detail: detail.0,
             detailColor: detail.1,
-            isOn: Binding(get: { isOn && suspended == nil }, set: { _ in Task { await tap() } }),
+            isOn: Binding(get: { isOn }, set: { _ in Task { await tap() } }),
             enabled: !helper.isWorking && helper.status != .unsigned,
             onAir: controller.session != nil
         )
@@ -108,6 +114,13 @@ struct LidRow: View {
     }
 
     private func tap() async {
+        // Lid mode the session wants, held or waiting for the helper (approval, a check, an
+        // install): the switch turns it off.
+        if controller.session != nil, isOn {
+            installError = nil
+            controller.setLidMode(false)
+            return
+        }
         switch helper.status {
         case .unsigned:
             return
@@ -122,15 +135,11 @@ struct LidRow: View {
             }
             // Wanted now, applied once the user allows the helper (HelperModel.onBecameInstalled).
             controller.setLidMode(true)
-        case .installed, .error:
+        case .installed, .checking, .error:
+            // Checking: wanted now, applied once the daemon has answered. A safety pause shows
+            // off: the user's enable lifts it (unless the rule still holds).
             installError = nil
-            if suspended != nil {
-                controller.setLidMode(true)
-            } else {
-                // Decide on what the switch shows: after a failed disable the setting is off
-                // but lid mode is still active, and a tap must retry the disable.
-                controller.setLidMode(!isOn)
-            }
+            controller.setLidMode(!isOn)
         }
     }
 }

@@ -24,14 +24,15 @@ public struct LegacySleepReset: Sendable {
     }
 
     /// Resets once when the 0.2.0 marker and sudoers rule are there, the daemon is not
-    /// installed (it cleans up itself) and no other copy of Lidless (a 0.2.0 one, which owns
-    /// its session) runs. Without the marker a 1 is someone else's and stays. Never throws: a
-    /// failure is logged and the marker kept.
+    /// installed (it cleans up itself; one still being checked is registered all the same)
+    /// and no other copy of Lidless (a 0.2.0 one, which owns its session) runs. Without the
+    /// marker a 1 is someone else's and stays. Never throws: a failure is logged and the
+    /// marker kept.
     public func resetIfNeeded(helperStatus: HelperStatus, otherCopyRunning: Bool) {
         let fm = FileManager.default
         let marker = fsPath(LegacyHelperCleaner.markerFile)
         guard fm.fileExists(atPath: marker), fm.fileExists(atPath: fsPath(Self.rule)),
-              helperStatus != .installed, !otherCopyRunning else { return }
+              helperStatus != .installed, helperStatus != .checking, !otherCopyRunning else { return }
         let failure: String
         do {
             let result = try runner.run(Self.command[0], Array(Self.command.dropFirst()))

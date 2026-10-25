@@ -11,6 +11,7 @@ public final class HelperConnection: NSObject, HelperProtocol, @unchecked Sendab
     private let sleepGuard: SleepGuard
     private let cleaner: LegacyHelperCleaner
     private let version: String
+    private let build: String
     /// Read by `info`; SleepGuard keeps its own.
     private let setting: SleepSetting
     /// Called after every `setSleepDisabled`, so the daemon can re-check its timers.
@@ -19,13 +20,14 @@ public final class HelperConnection: NSObject, HelperProtocol, @unchecked Sendab
     private var closed = false
 
     public init(
-        holder: UUID, guard sleepGuard: SleepGuard, cleaner: LegacyHelperCleaner, version: String,
+        holder: UUID, guard sleepGuard: SleepGuard, cleaner: LegacyHelperCleaner, version: String, build: String,
         setting: SleepSetting = PmsetSleepSetting(), onGuardChange: @escaping @Sendable () -> Void = {}
     ) {
         self.holder = holder
         self.sleepGuard = sleepGuard
         self.cleaner = cleaner
         self.version = version
+        self.build = build
         self.setting = setting
         self.onGuardChange = onGuardChange
     }
@@ -62,13 +64,13 @@ public final class HelperConnection: NSObject, HelperProtocol, @unchecked Sendab
         }
     }
 
-    public func info(reply: @escaping @Sendable (String, Bool, String?) -> Void) {
+    public func info(reply: @escaping @Sendable (String, String, Bool, Bool, String?) -> Void) {
         do {
-            reply(version, try setting.isDisabled(), nil)
+            reply(version, build, try setting.isDisabled(), sleepGuard.ownsSetting, nil)
         } catch {
             let message = HelperError.message(for: error)
             Self.log.error("info: reading disablesleep failed: \(message, privacy: .public)")
-            reply(version, false, message)
+            reply(version, build, false, sleepGuard.ownsSetting, message)
         }
     }
 

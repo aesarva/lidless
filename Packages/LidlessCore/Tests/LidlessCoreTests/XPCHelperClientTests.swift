@@ -53,9 +53,9 @@ private final class TestService: NSObject, HelperProtocol, @unchecked Sendable {
         answer { reply(error) }
     }
 
-    func info(reply: @escaping @Sendable (String, Bool, String?) -> Void) {
+    func info(reply: @escaping @Sendable (String, String, Bool, Bool, String?) -> Void) {
         let (version, error) = (self.version, self.infoError)
-        answer { reply(version, true, error) }
+        answer { reply(version, "7", true, false, error) }
     }
 
     func removeLegacyHelper(reply: @escaping @Sendable ([String], String?) -> Void) {
@@ -129,10 +129,13 @@ private final class Harness: NSObject, NSXPCListenerDelegate, @unchecked Sendabl
         return true
     }
 
-    func makeClient(timeout: TimeInterval = 2) -> XPCHelperClient {
+    /// `requirementForFirst`: a code-signing requirement set on the first connection only.
+    func makeClient(timeout: TimeInterval = 2, requirementForFirst: String? = nil) -> XPCHelperClient {
         XPCHelperClient(timeout: timeout) { [self] in
-            lock.withLock { made += 1 }
-            return NSXPCConnection(listenerEndpoint: listener.endpoint)
+            let n = lock.withLock { made += 1; return made }
+            let c = NSXPCConnection(listenerEndpoint: listener.endpoint)
+            if n == 1, let requirementForFirst { c.setCodeSigningRequirement(requirementForFirst) }
+            return c
         }
     }
 }
@@ -171,10 +174,41 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
 }
 
 @Suite struct XPCHelperClientTests {
+    @Test func infoDecodesBuildAndOwned() throws {
+        let client = Harness().makeClient()
+        let info = try client.info()
+        #expect(info.build == "7")
+        #expect(!info.owned)
+    }
+
+    /// A daemon whose bundle was replaced while it runs (an update) no longer satisfies the
+    /// client's code-signing requirement. Re-registration starts the new one: `.rejected`,
+    /// the failed connection is reported lost, and the same client reaches the replacement.
+    @Test func daemonFailingTheSignatureRequirementIsRejected() throws {
+        let harness = Harness()
+        let client = harness.makeClient(requirementForFirst: #"identifier "io.github.aesarva.Lidless.nobody""#)
+        let lost = LockedValue<[UInt64]>([])
+        let counter = Counter()
+        client.onConnectionLost = { generation in
+            lost.value.append(generation)
+            counter.increment()
+        }
+        #expect {
+            try client.info()
+        } throws: { error in
+            if case .rejected = error as? HelperError { return true }
+            return false
+        }
+        #expect(counter.fired.wait(timeout: .now() + 2) == .success)
+        #expect(lost.value == [1])
+        #expect(try client.info().version == "1.0")
+        #expect(harness.connectionsMade == 2)
+    }
+
     @Test func replyComesBackAsHelperInfo() throws {
         let harness = Harness()
         let client = harness.makeClient()
-        #expect(try client.info() == HelperInfo(version: "1.0", sleepDisabled: true))
+        #expect(try client.info() == HelperInfo(version: "1.0", build: "7", sleepDisabled: true, owned: false))
         #expect(try client.removeLegacyHelper() == ["/a"])
     }
 
@@ -217,12 +251,14 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         #expect(throws: HelperError.commandFailed("pmset -g failed")) { try client.info() }
     }
 
-    @Test func silentServiceTimesOut() {
+    /// No reply within the timeout is `.timedOut`, not a reply with an error: the backend
+    /// re-registers after two in a row, never after an error reply.
+    @Test func timeoutThrowsTimedOut() {
         let harness = Harness()
         harness.service.hang = true
         let client = harness.makeClient(timeout: 0.3)
         let time = elapsed {
-            #expect(throws: HelperError.commandFailed("timed out")) { try client.info() }
+            #expect(throws: HelperError.timedOut) { try client.info() }
         }
         #expect(time < 1.3)
     }
@@ -233,7 +269,7 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         let client = harness.makeClient(timeout: 0.3)
         let lost = Counter()
         client.onConnectionLost = { _ in lost.increment() }
-        #expect(throws: HelperError.commandFailed("timed out")) { try client.info() }
+        #expect(throws: HelperError.timedOut) { try client.info() }
         #expect(lost.fired.wait(timeout: .now() + 2) == .success)
         // The invalidated connection's own handler runs too; it must not report again.
         Thread.sleep(forTimeInterval: 0.2)
@@ -253,7 +289,7 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
             retried.signal()
         }
         let time = elapsed {
-            #expect(throws: HelperError.commandFailed("timed out")) { try client.info() }
+            #expect(throws: HelperError.timedOut) { try client.info() }
         }
         // A synchronous callback would add the retry's own 0.5 s timeout.
         #expect(time < 0.9)
@@ -266,7 +302,7 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         let client = harness.makeClient(timeout: 0.3)
         let lost = Counter()
         client.onConnectionLost = { _ in lost.increment() }
-        #expect(throws: HelperError.commandFailed("timed out")) { try client.info() }
+        #expect(throws: HelperError.timedOut) { try client.info() }
         #expect(lost.fired.wait(timeout: .now() + 2) == .success)
         harness.service.hang = false
         #expect(try client.info().version == "1.0")
@@ -311,11 +347,11 @@ private func elapsed(_ body: () throws -> Void) rethrows -> TimeInterval {
         let harness = Harness()
         harness.service.hang = true
         let client = harness.makeClient(timeout: 0.3)
-        #expect(throws: HelperError.commandFailed("timed out")) { try client.info() }
+        #expect(throws: HelperError.timedOut) { try client.info() }
         harness.service.hang = false
         harness.service.version = "2.0"
         harness.service.flushPending() // the old reply ("1.0") arrives late
-        #expect(try client.info() == HelperInfo(version: "2.0", sleepDisabled: true))
+        #expect(try client.info() == HelperInfo(version: "2.0", build: "7", sleepDisabled: true, owned: false))
         #expect(try client.info().version == "2.0")
     }
 }

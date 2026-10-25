@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lidControl: LidSleepControlling!
     private(set) var controller: SessionController!
     private(set) var engine: SafetyEngine!
+    private(set) var updates: UpdateController!
     private var statusItem: StatusItemController!
     private var settingsWindow: SettingsWindowController!
     private var notifier: UserNotifier!
@@ -16,12 +17,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         StudioFont.register()
-        #if DEBUG
-        // Debug args come only from the command line (argument domain), never from persisted defaults.
+        // Launch args (debug ones, and -UpdateFeedURL in every build) come only from the command
+        // line (argument domain), never from persisted defaults.
         let args = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        #if DEBUG
         if let dir = args["SnapshotDir"] as? String {
             SnapshotExporter.export(to: dir)
-            NSApp.terminate(nil)
+            Task {
+                await SnapshotExporter.exportWindows(to: dir)
+                NSApp.terminate(nil)
+            }
             return
         }
         #endif
@@ -30,18 +35,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .requirement(identifier: HelperIDs.helper, teamID: CodeSigningRequirement.ownTeamID())
             .map { XPCHelperClient(requirement: $0) }
         backend = DaemonBackend(registration: SMAppServiceRegistration(), client: client,
-                                appVersion: Bundle.main.shortVersion)
+                                appVersion: Bundle.main.shortVersion, appBuild: Bundle.main.buildVersion)
         // A 0.2.0 closed-lid session force-quit just before this launch: its watchdog sees this
-        // process and never resets, and a daemon not yet approved cannot. In the background:
-        // sudo may take a moment, and it only ever writes 0.
+        // process and never resets, and a daemon not yet approved cannot. First on the lid
+        // queue, off the main thread (sudo may take a moment, and it only ever writes 0): lid
+        // mode waits for it quietly instead of racing it.
         let helperStatus = backend.status()
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let otherCopyRunning = NSRunningApplication.runningApplications(withBundleIdentifier: HelperIDs.app)
             .contains { $0.processIdentifier != ownPID }
-        DispatchQueue.global(qos: .utility).async {
+        lid = LidSleepService(backend: backend, first: {
             LegacySleepReset().resetIfNeeded(helperStatus: helperStatus, otherCopyRunning: otherCopyRunning)
-        }
-        lid = LidSleepService(backend: backend)
+        })
         notifier = UserNotifier()
         let clock = SystemClock()
         lidControl = lid
@@ -49,13 +54,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         // Design-review runs never turn closed-lid mode on through the real helper or touch the
         // user's settings: another Lidless may be running with lid mode on.
-        if args["DebugStartSession"] != nil || args["CapturePanelTo"] != nil {
+        let reviewRun = args["DebugStartSession"] != nil || args["CapturePanelTo"] != nil
+        if reviewRun {
             lidControl = PreviewLid()
             let store = PreviewStore()
             store.settings.lidModeEnabled = true
             settingsStore = store
         }
+        #else
+        let reviewRun = false
         #endif
+        // The session the previous copy saved before an update relaunched it: read and removed
+        // once, before any session can start (never in a design-review run).
+        let resumeStore: ResumeStore? = reviewRun ? nil : UserDefaultsResumeStore()
+        let resumeSnapshot = resumeStore?.take()
         let controller = SessionController(
             assertions: IOPMSleepAssertionService(),
             lid: lidControl,
@@ -71,12 +83,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notifier.safetySettings = { [weak controller] in controller?.settings.safety ?? SafetySettings() }
         notifier.onExtend = { [weak controller] minutes in controller?.extend(byMinutes: minutes) }
 
+        // -UpdateFeedURL works in Release too: Sparkle checks the EdDSA and code signatures anyway.
+        // -UpdateOfferLifetime <seconds> shortens the offer for testing; kept within 10 s … 7 days,
+        // since 0 would re-check in a loop and a huge value would overflow the sleep.
+        let offerLifetime = (args["UpdateOfferLifetime"] as? String).flatMap(Double.init)
+            .flatMap { $0.isFinite ? Duration.seconds(min(max($0, 10), 7 * 24 * 60 * 60)) : nil }
+        let updates = UpdateController(
+            feedOverride: args["UpdateFeedURL"] as? String,
+            offerLifetime: offerLifetime ?? .seconds(24 * 60 * 60),
+            onShowPanel: { [weak self] in self?.statusItem?.openPanel() },
+            lidIsOpen: { [weak controller] in !(controller?.readings?.lidClosed ?? false) },
+            // Only the session on air is saved; quitting then ends it as usual (the snapshot
+            // brings it back in the new copy).
+            onWillRelaunch: { [weak controller] in
+                if let s = controller?.snapshot(now: clock.now) { resumeStore?.save(s) }
+            },
+            // The relaunch did not happen: this copy keeps the session on air itself.
+            onRelaunchAbandoned: { resumeStore?.discard() }
+        )
+        self.updates = updates
+
         engine = SafetyEngine(
             power: IOPowerMonitor(),
             thermal: SystemThermalMonitor(),
             lid: IORegistryLidMonitor(),
             clock: clock,
-            onReadings: { [weak controller] readings in controller?.update(readings: readings) }
+            onReadings: { [weak controller, weak updates] readings in
+                controller?.update(readings: readings)
+                // An install held while the lid was closed goes ahead once it opens.
+                if !readings.lidClosed { updates?.lidDidOpen() }
+            }
         )
 
         let helper = HelperModel(backend: backend, lidModeHeld: { [weak controller] in
@@ -87,21 +123,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Lid mode wanted while the helper is in error: checked again in the background, so the
         // switch never waits for a call that would time out.
         controller.onHelperRefreshNeeded = { [weak helper] in helper?.refresh() }
-        settingsWindow = SettingsWindowController(controller: controller, helper: helper)
+        settingsWindow = SettingsWindowController(controller: controller, helper: helper, updates: updates)
         statusItem = StatusItemController(
             controller: controller,
             helper: helper,
+            updates: updates,
             openSettings: { [weak self] tab in self?.settingsWindow.show(tab: tab) }
         )
-        // Order matters: undo a leftover lid mode, then take the first readings
-        // (engine.start() refreshes immediately), then start-on-launch sees them. The daemon
-        // removes a 0.2.0 helper itself when it starts, before any client can connect.
-        controller.recoverAtLaunch()
+        // Order matters: take the first readings (engine.start() refreshes immediately), then
+        // the resumed session or start-on-launch sees them. The daemon undoes a leftover hold
+        // and removes a 0.2.0 helper itself when it starts, before any client can connect.
         engine.start()
-        controller.startOnLaunchIfEnabled()
+        controller.launch(resuming: resumeSnapshot)
         statusItem.refresh()
-        // Checks the daemon's version once at launch.
+        // Checks the daemon's version and build once at launch.
         helper.refresh()
+        // After the first readings: an install Sparkle resumes at once needs the lid state.
+        updates.start()
         #if DEBUG
         // -DebugStartSession YES -OpenPanelOnLaunch YES: live panel captures for design review.
         if (args["DebugStartSession"] as? String)?.lowercased() == "indefinite" {
@@ -161,15 +199,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         guard let controller else { return } // nil when a debug snapshot run quits early
         // Leave the Mac exactly as macOS would have it: the session's assertions go with the
-        // process, and closed-lid mode (`pmset disablesleep`) is turned back off here.
+        // process. Closed-lid mode (`pmset disablesleep`) is released without waiting: the
+        // daemon lets go of this app's hold when its connection closes with the process.
         if case .active = controller.state { controller.stop(.appQuit) }
-        // Kept for the protocol; the daemon also lets go when this process's connection closes.
-        _ = lidControl.recoverIfNeeded()
     }
 }
 
 extension Bundle {
     var shortVersion: String {
         object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+    }
+
+    var buildVersion: String {
+        object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
     }
 }

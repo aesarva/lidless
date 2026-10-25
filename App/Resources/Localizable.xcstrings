@@ -14,6 +14,26 @@
         }
       }
     },
+    "%@ left": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "осталось %@"
+          }
+        }
+      }
+    },
+    "%@, update available": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, доступно обновление"
+          }
+        }
+      }
+    },
     "%lld h": {
       "localizations": {
         "ru": {
@@ -124,6 +144,46 @@
         }
       }
     },
+    "Check Now": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Проверить сейчас"
+          }
+        }
+      }
+    },
+    "Check for updates automatically": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Проверять обновления автоматически"
+          }
+        }
+      }
+    },
+    "Checking for updates…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Проверка обновлений…"
+          }
+        }
+      }
+    },
+    "Checking…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Проверка…"
+          }
+        }
+      }
+    },
     "Closed-Lid Mode": {
       "localizations": {
         "ru": {
@@ -224,12 +284,52 @@
         }
       }
     },
+    "Couldn't restore normal sleep — the helper was not removed.": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось вернуть обычный сон — помощник не удалён."
+          }
+        }
+      }
+    },
+    "Couldn't update": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось обновить"
+          }
+        }
+      }
+    },
+    "Couldn't update: %@": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось обновить: %@"
+          }
+        }
+      }
+    },
     "Default duration": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
             "value": "Длительность по умолчанию"
+          }
+        }
+      }
+    },
+    "Downloading %@": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Скачивание %@"
           }
         }
       }
@@ -320,6 +420,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "Бессрочно"
+          }
+        }
+      }
+    },
+    "Install and Relaunch": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Установить и перезапустить"
+          }
+        }
+      }
+    },
+    "Install version %@": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Установить версию %@"
+          }
+        }
+      }
+    },
+    "Installing…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Установка…"
+          }
+        }
+      }
+    },
+    "Installs when you open the lid": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Установится, когда откроешь крышку"
           }
         }
       }
@@ -423,6 +563,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "После %@ Mac сможет уснуть."
+          }
+        }
+      }
+    },
+    "Move Lidless to Applications to keep it updated": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Перенеси Lidless в Программы, чтобы обновлять его"
           }
         }
       }
@@ -543,6 +693,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Перезапустить Lidless"
+          }
+        }
+      }
+    },
+    "Retry": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Повторить"
+          }
+        }
+      }
+    },
+    "Running — version %@ (build %@)": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Работает — версия %@ (сборка %@)"
           }
         }
       }
@@ -777,12 +947,32 @@
         }
       }
     },
-    "Version %@": {
+    "Updates": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Версия %@"
+            "value": "Обновления"
+          }
+        }
+      }
+    },
+    "Version %@ (build %@)": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Версия %@ (сборка %@)"
+          }
+        }
+      }
+    },
+    "Version %@ available": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Доступна версия %@"
           }
         }
       }
@@ -797,12 +987,52 @@
         }
       }
     },
+    "What's new": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Что нового"
+          }
+        }
+      }
+    },
+    "You have the latest version": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Установлена последняя версия"
+          }
+        }
+      }
+    },
     "allow Lidless in System Settings → Login Items": {
       "localizations": {
         "ru": {
           "stringUnit": {
             "state": "translated",
             "value": "разреши Lidless в Системных настройках → Объекты входа"
+          }
+        }
+      }
+    },
+    "checking…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "проверка…"
+          }
+        }
+      }
+    },
+    "closed-lid mode": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "режим крышки"
           }
         }
       }
@@ -870,6 +1100,16 @@
         }
       }
     },
+    "needs attention": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "нужно внимание"
+          }
+        }
+      }
+    },
     "no battery": {
       "localizations": {
         "ru": {
@@ -886,6 +1126,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "норма"
+          }
+        }
+      }
+    },
+    "off air": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "не в эфире"
+          }
+        }
+      }
+    },
+    "on air": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "в эфире"
           }
         }
       }
@@ -1016,6 +1276,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "экран горит"
+          }
+        }
+      }
+    },
+    "turning on…": {
+      "localizations": {
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "включается…"
           }
         }
       }

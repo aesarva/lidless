@@ -4,6 +4,7 @@ import LidlessCore
 struct GeneralTab: View {
     @Bindable var controller: SessionController
     let loginItem: LoginItem
+    let updates: any UpdateSource
     @State private var newPreset = 30
     @State private var language = LanguageModel()
 
@@ -69,10 +70,49 @@ struct GeneralTab: View {
 
             Toggle("Show remaining time in menu bar", isOn: $controller.settings.showTimerInMenuBar)
             Toggle("Start a session when Lidless launches", isOn: $controller.settings.startSessionOnLaunch)
+
+            Section("Updates") {
+                Toggle("Check for updates automatically", isOn: Binding(
+                    get: { updates.automaticallyChecks }, set: { updates.automaticallyChecks = $0 }))
+                HStack(alignment: .firstTextBaseline) {
+                    if let status = updateStatus {
+                        Text(status)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Button("Check Now") { updates.checkNow() }
+                        .disabled(updateBusy || !updates.canCheckNow)
+                }
+            }
         }
         .formStyle(.grouped)
         .scrollDisabled(true)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// No manual check while an update is under way, or from a copy Sparkle cannot update.
+    private var updateBusy: Bool {
+        switch updates.state {
+        case .checking, .downloading, .installing, .waitingForLid, .needsMove: true
+        case .idle, .upToDate, .available, .failed: false
+        }
+    }
+
+    /// The result of the last check, in the panel's words; "up to date" is shown only here.
+    private var updateStatus: String? {
+        switch updates.state {
+        case .idle: nil
+        case .checking: String(localized: "Checking for updates…")
+        case .upToDate: String(localized: "You have the latest version")
+        case .available(let version, _): String(localized: "Version \(version) available")
+        case .downloading(let version, _): String(localized: "Downloading \(version)")
+        case .installing: String(localized: "Installing…")
+        case .waitingForLid: String(localized: "Installs when you open the lid")
+        case .failed(let message): String(localized: "Couldn't update: \(message)")
+        case .needsMove: String(localized: "Move Lidless to Applications to keep it updated")
+        }
     }
 
     private func addPreset(_ minutes: Int) {

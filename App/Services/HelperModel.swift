@@ -8,10 +8,15 @@ import LidlessCore
     @ObservationIgnored private let coordinator: HelperCoordinator
     private(set) var status: HelperStatus
     private(set) var isWorking = false
+    /// Set for a whole helper removal (the release check, the backend call and the restore),
+    /// so `isWorking` covers it all and not just the backend call.
+    @ObservationIgnored private var removing = false
     /// The 0.2.0 sudoers helper was there earlier in this launch and is gone now.
     private(set) var legacyRemoved = false
     /// Why removing the 0.2.0 helper failed (the daemon retries when it next starts).
     private(set) var legacyError: String?
+    /// The daemon's last answer (version and build on the Helper tab).
+    private(set) var daemonInfo: HelperInfo?
 
     /// Called when the status turns `.installed`.
     var onBecameInstalled: (() -> Void)? {
@@ -26,6 +31,7 @@ import LidlessCore
         self.backend = backend
         coordinator = HelperCoordinator(backend: backend, scheduler: scheduler, lidModeHeld: lidModeHeld)
         status = coordinator.status
+        daemonInfo = backend.lastInfo()
         coordinator.onChange = { [weak self] in self?.sync() }
     }
 
@@ -39,6 +45,8 @@ import LidlessCore
         if status != coordinator.status { status = coordinator.status }
         if legacyRemoved != coordinator.legacyRemoved { legacyRemoved = coordinator.legacyRemoved }
         if legacyError != coordinator.legacyError { legacyError = coordinator.legacyError }
+        let info = backend.lastInfo()
+        if daemonInfo != info { daemonInfo = info }
     }
 
     /// Registers the daemon; macOS opens Login Items when it needs the user's approval.
@@ -50,13 +58,24 @@ import LidlessCore
         await run { try $0.uninstall() }
     }
 
+    /// Brackets a helper removal: the buttons stay disabled from the release check to the end.
+    func beginRemoval() {
+        removing = true
+        isWorking = true
+    }
+
+    func endRemoval() {
+        removing = false
+        isWorking = false
+    }
+
     func openSystemSettings() {
         backend.openSystemSettings()
     }
 
     private func run(_ work: @escaping @Sendable (PrivilegedBackend) throws -> Void) async -> HelperError? {
         isWorking = true
-        defer { isWorking = false }
+        defer { if !removing { isWorking = false } }
         let backend = self.backend
         let result: HelperError? = await Task.detached {
             do {

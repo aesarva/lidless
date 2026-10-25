@@ -16,6 +16,8 @@ public struct Session: Equatable, Sendable {
     public var keepDisplayOn: Bool
     /// disablesleep=1 установлен нами
     public var lidModeActive: Bool
+    /// Режим крышки нужен, но помощник ещё не подтвердил удержание («Включается…»).
+    public var lidModePending: Bool
     /// момент последнего успешного включения
     public var lidModeEnabledAt: Date?
     public var lidModeSuspendedReason: SafetyReason?
@@ -28,6 +30,7 @@ public struct Session: Equatable, Sendable {
         endsAt: Date? = nil,
         keepDisplayOn: Bool = false,
         lidModeActive: Bool = false,
+        lidModePending: Bool = false,
         lidModeEnabledAt: Date? = nil,
         lidModeSuspendedReason: SafetyReason? = nil,
         endingSoonNotified: Bool = false
@@ -37,6 +40,7 @@ public struct Session: Equatable, Sendable {
         self.endsAt = endsAt
         self.keepDisplayOn = keepDisplayOn
         self.lidModeActive = lidModeActive
+        self.lidModePending = lidModePending
         self.lidModeEnabledAt = lidModeEnabledAt
         self.lidModeSuspendedReason = lidModeSuspendedReason
         self.endingSoonNotified = endingSoonNotified
@@ -54,5 +58,7 @@ public struct LidModeRestorePoint: Equatable, Sendable {
     public let sessionID: UUID?
     public let lidModeEnabled: Bool
     public let wasActive: Bool
+    /// The hold was on its way (wanted, not confirmed yet).
+    public let wasPending: Bool
     public let suspendedReason: SafetyReason?
 }

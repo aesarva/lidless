@@ -91,7 +91,7 @@ struct SessionControllerTests {
         clock.advance(100)
         #expect(!c.start(.minutes(60)))
         #expect(c.session == before)
-        #expect(lid.enableCalls == 1)
+        #expect(lid.wanted == [true])
         #expect(assertions.acquired == [false])
     }
 
@@ -138,23 +138,20 @@ struct SessionControllerTests {
         #expect(assertions.acquired.isEmpty)
     }
 
-    @Test func recoverAtLaunchCallsLidAndOptionallyStarts() {
-        c.recoverAtLaunch()
-        #expect(lid.recoverCalls == 1)
-        #expect(c.state == .off)
+    /// Nothing to undo at launch: the daemon resets a leftover hold when it starts and when
+    /// this app's connection goes away. The lid wish stays "no" until a session wants it.
+    @Test func startOnLaunchOnlyWhenEnabled() {
         c.startOnLaunchIfEnabled()
         #expect(c.state == .off)
+        #expect(lid.wanted.isEmpty)
         c.settings.startSessionOnLaunch = true
-        c.recoverAtLaunch()
-        #expect(lid.recoverCalls == 2)
-        #expect(c.state == .off)
         c.startOnLaunchIfEnabled()
         #expect(c.session != nil)
+        #expect(lid.wanted.isEmpty)
     }
 
     @Test func startOnLaunchSeesFirstReadings() {
         c.settings.startSessionOnLaunch = true
-        c.recoverAtLaunch()
         c.update(readings: SafetyReadings(batteryLevel: 5, onBattery: true, thermal: .nominal,
                                           lidClosed: false, lidClosedOnBatterySince: nil, now: t0))
         c.startOnLaunchIfEnabled()
@@ -165,10 +162,10 @@ struct SessionControllerTests {
     @Test func lidModeEnabledOnStartAndDisabledOnStop() {
         c.settings.lidModeEnabled = true
         c.start(.indefinite)
-        #expect(lid.enableCalls == 1)
+        #expect(lid.wanted == [true])
         #expect(c.session?.lidModeActive == true)
         #expect(c.session?.lidModeEnabledAt == t0)
         c.stop(.user)
-        #expect(lid.disableCalls == 1)
+        #expect(lid.wanted == [true, false])
     }
 }

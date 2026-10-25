@@ -67,15 +67,18 @@ import Testing
         #expect(exists(root, marker))
     }
 
-    /// The daemon's own 0.2.0 cleanup resets it when it starts.
+    /// The daemon's own 0.2.0 cleanup resets it when it starts; one not checked yet (as at
+    /// launch) is registered all the same.
     @Test func installedDaemonIsLeftToCleanUp() throws {
-        let root = try makeRoot([marker, rule])
-        defer { try? FileManager.default.removeItem(at: root) }
-        let runner = FakeCommandRunner()
-        LegacySleepReset(root: root, runner: runner)
-            .resetIfNeeded(helperStatus: .installed, otherCopyRunning: false)
-        #expect(runner.calls.isEmpty)
-        #expect(exists(root, marker))
+        for status: HelperStatus in [.installed, .checking] {
+            let root = try makeRoot([marker, rule])
+            defer { try? FileManager.default.removeItem(at: root) }
+            let runner = FakeCommandRunner()
+            LegacySleepReset(root: root, runner: runner)
+                .resetIfNeeded(helperStatus: status, otherCopyRunning: false)
+            #expect(runner.calls.isEmpty)
+            #expect(exists(root, marker))
+        }
     }
 
     /// A running 0.2.0 copy owns its session.
