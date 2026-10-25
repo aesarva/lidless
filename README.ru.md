@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/icon.png" width="128" height="128" alt="Иконка Lidless: горящая красная лампа ON AIR с линией пульса">
+  <img src="docs/images/icon.png" width="128" height="128" alt="Иконка Lidless: горящий красный студийный маячок с линией пульса">
 </p>
 
 <h1 align="center">Lidless</h1>

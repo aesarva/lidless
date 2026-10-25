@@ -43,7 +43,7 @@ Glanced at and clicked from the menu bar dozens of times a day, usually in passi
 - Name: **Lidless** (renamed from WakeUp on 2026-10-16).
 - Visual world: the "On Air" broadcast studio (see DESIGN.md). The ON AIR sign is lit exactly while the Mac is held awake, and red is reserved for being on air.
 - Menu-bar glyphs: a quiet flat line when off; a lit red lamp carrying a pulse line on air, burning down with a timer; a horizon line under the lamp in closed-lid mode; an orange attention dot, the only other colour.
-- App icon: a lit red ON AIR light box with a warm-white pulse line on studio black (generated raster, provenance in docs/asset-provenance.md).
+- App icon: a glossy red studio beacon, lit from inside, with a warm-white pulse line, on a dark metal base, on studio black (generated raster, provenance in docs/asset-provenance.md).
 
 ## Evidence on Hand
 
