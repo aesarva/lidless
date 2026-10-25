@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 — 2026-10-26
 
-- New app icon: a glossy red studio beacon with the pulse line.
+- New app icon: a glossy red studio beacon, lit from inside, with the pulse line.
 
 ## 0.4.0 — 2026-10-24
 
